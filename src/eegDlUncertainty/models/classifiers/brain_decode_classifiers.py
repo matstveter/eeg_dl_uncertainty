@@ -6,7 +6,7 @@ from eegDlUncertainty.models.base_classifier import BaseClassifier
 
 
 class EEGNetv4MTSC(EEGNetv4, BaseClassifier):
-    def __init__(self, **kwargs):
+    def __init__(self, name, **kwargs):
 
         in_channels = kwargs.pop("in_channels")
         num_classes = kwargs.pop("num_classes")
@@ -23,6 +23,6 @@ class EEGNetv4MTSC(EEGNetv4, BaseClassifier):
         third_kernel_size: Tuple[int, int] = kwargs.get("third_kernel_size", (8, 4))
 
         # Initialise by calling super class
-        super().__init__(in_chans=in_channels, n_classes=num_classes, input_window_samples=time_steps,
+        super().__init__(name=name, in_chans=in_channels, n_classes=num_classes, input_window_samples=time_steps,
                          final_conv_length=final_conv_length, pool_mode=pool_mode, F1=f1, D=d, F2=f2,
                          kernel_length=kernel_length, third_kernel_size=third_kernel_size, drop_prob=dropout_rate)
