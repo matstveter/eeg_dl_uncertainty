@@ -1,0 +1,15 @@
+{
+  "preprocessing": {
+    "low_freq": 0.1,
+    "high_freq": 40,
+    "num_seconds_per_subject": 60,
+    "downsample": true,
+    "epochs": 1,
+    "artefact_removal": []
+  },
+  "file_paths": {
+    "eeg_data": "/home/tvetern/datasets/cau_eeg/caueeg-dataset/signal/edf/",
+    "eeg_events": "/home/tvetern/datasets/cau_eeg/caueeg-dataset/event/",
+    "output_directory": "/home/tvetern/datasets/cau_eeg/numpy/"
+  }
+}
