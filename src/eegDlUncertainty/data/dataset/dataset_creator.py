@@ -90,7 +90,7 @@ def process_events(event_json_path: str, event_key: str) -> Dict[str, int]:
     return subject_event
 
 
-def process_eeg_data(config: Dict[str, Any], conf_path: str, start: int = 60, nyquist: int = 3) -> None:
+def process_eeg_data(config: Dict[str, Any], conf_path: str, nyquist: int = 3) -> None:
     """
     Process EEG (Electroencephalography) data files based on a given configuration.
 
@@ -107,8 +107,6 @@ def process_eeg_data(config: Dict[str, Any], conf_path: str, start: int = 60, ny
         event information, and preprocessing details.
     conf_path : str
         The path to the configuration file.
-    start : int, optional
-        The start time for processing the EEG data, default is 60 seconds.
     nyquist : int, optional
         The Nyquist frequency to be considered for filtering the data, default is 3 Hz.
 
@@ -170,7 +168,8 @@ def process_eeg_data(config: Dict[str, Any], conf_path: str, start: int = 60, ny
 
     with multiprocessing.Pool(processes=(multiprocessing.cpu_count() - 1)) as pool:
         pool.starmap(process_eeg_file,
-                     [(sub_eeg, eeg_path, events, preprocess, nyquist, outp_path, start) for sub_eeg in eeg_files])
+                     [(sub_eeg, eeg_path, events, preprocess, nyquist, outp_path, preprocess['start'])
+                      for sub_eeg in eeg_files])
     shutil.copy(src=conf_path, dst=outp_path)
 
 
@@ -246,7 +245,22 @@ def process_eeg_file(sub_eeg, eeg_path, events, preprocess, nyquist, out_p, star
 
     end_time = preprocess['num_seconds_per_subject'] + start
 
-    raw_eeg_data.crop(tmin=start, tmax=end_time, verbose=False, include_tmax=False)
+    time_max = raw_eeg_data.times[-1]
+    # Check that the recording is shorter or equal the end time
+    if time_max >= end_time:
+        raw_eeg_data.crop(tmin=start, tmax=end_time, verbose=False, include_tmax=False)
+    # Check if we can start the recording from an earlier position...
+    elif time_max >= preprocess['num_seconds_per_subject']:
+        # Check if we  start earlier in the recording
+        if start == preprocess['start']:
+            start = 0
+        else:
+            start -= preprocess['start']
+        raw_eeg_data.crop(tmin=start, tmax=(start+preprocess['num_seconds_per_subject']), verbose=False,
+                          include_tmax=False)
+    else:
+        print(f"Subject {sub_eeg} data is too short, skipping...")
+        return
 
     # Lowpass and high_pass filter the data
     raw_eeg_data.filter(l_freq=preprocess['low_freq'], h_freq=preprocess['high_freq'], verbose=False)
