@@ -91,7 +91,7 @@ def process_events(event_json_path: str, event_key: str) -> Dict[str, int]:
     return subject_event
 
 
-def process_eeg_data(config: Dict[str, Any], conf_path: str, nyquist: int = 3) -> None:
+def process_eeg_data(config: Dict[str, Any], conf_path: str) -> None:
     """
     Process EEG (Electroencephalography) data files based on a given configuration.
 
@@ -108,8 +108,6 @@ def process_eeg_data(config: Dict[str, Any], conf_path: str, nyquist: int = 3) -
         event information, and preprocessing details.
     conf_path : str
         The path to the configuration file.
-    nyquist : int, optional
-        The Nyquist frequency to be considered for filtering the data, default is 3 Hz.
 
     Raises
     ------
@@ -171,12 +169,12 @@ def process_eeg_data(config: Dict[str, Any], conf_path: str, nyquist: int = 3) -
     if config['use_multiprocessing']:
         with multiprocessing.Pool(processes=(multiprocessing.cpu_count() - 1)) as pool:
             pool.starmap(process_eeg_file,
-                         [(sub_eeg, eeg_path, events, preprocess, nyquist, outp_path, preprocess['start'])
+                         [(sub_eeg, eeg_path, events, preprocess, preprocess['nyquist'], outp_path, preprocess['start'])
                           for sub_eeg in eeg_files])
     else:
         for sub_eeg in eeg_files:
             process_eeg_file(sub_eeg=sub_eeg, eeg_path=eeg_path, events=events, preprocess=preprocess,
-                             nyquist=nyquist, out_p=outp_path, start=preprocess['start'])
+                             nyquist=preprocess['nyquist'], out_p=outp_path, start=preprocess['start'])
     print(f"Processing finished, time used: {time.perf_counter()-start}")
     shutil.copy(src=conf_path, dst=outp_path)
 
