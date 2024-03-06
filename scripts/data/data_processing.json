@@ -2,10 +2,10 @@
   "preprocessing": {
     "low_freq": 0.1,
     "high_freq": 40,
-    "num_seconds_per_subject": 60,
+    "num_seconds_per_subject": 300,
     "downsample": true,
-    "epochs": 1,
-    "artefact_removal": []
+    "artefact_removal": [],
+    "start": 30
   },
   "file_paths": {
     "eeg_data": "/home/tvetern/datasets/cau_eeg/caueeg-dataset/signal/edf/",
