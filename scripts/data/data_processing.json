@@ -11,5 +11,6 @@
     "eeg_data": "/home/tvetern/datasets/cau_eeg/caueeg-dataset/signal/edf/",
     "eeg_events": "/home/tvetern/datasets/cau_eeg/caueeg-dataset/event/",
     "output_directory": "/home/tvetern/datasets/cau_eeg/numpy/"
-  }
+  },
+  "use_multiprocessing": false
 }
