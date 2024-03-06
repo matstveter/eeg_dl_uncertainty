@@ -2,6 +2,7 @@ import math
 import multiprocessing
 import os
 import shutil
+import time
 from typing import Any, Dict
 import numpy as np
 
@@ -166,10 +167,17 @@ def process_eeg_data(config: Dict[str, Any], conf_path: str, nyquist: int = 3) -
 
     outp_path = create_output_folder(base_path=config['file_paths']['output_directory'])
 
-    with multiprocessing.Pool(processes=(multiprocessing.cpu_count() - 1)) as pool:
-        pool.starmap(process_eeg_file,
-                     [(sub_eeg, eeg_path, events, preprocess, nyquist, outp_path, preprocess['start'])
-                      for sub_eeg in eeg_files])
+    start = time.perf_counter()
+    if config['use_multiprocessing']:
+        with multiprocessing.Pool(processes=(multiprocessing.cpu_count() - 1)) as pool:
+            pool.starmap(process_eeg_file,
+                         [(sub_eeg, eeg_path, events, preprocess, nyquist, outp_path, preprocess['start'])
+                          for sub_eeg in eeg_files])
+    else:
+        for sub_eeg in eeg_files:
+            process_eeg_file(sub_eeg=sub_eeg, eeg_path=eeg_path, events=events, preprocess=preprocess,
+                             nyquist=nyquist, out_p=outp_path, start=preprocess['start'])
+    print(f"Processing finished, time used: {time.perf_counter()-start}")
     shutil.copy(src=conf_path, dst=outp_path)
 
 
