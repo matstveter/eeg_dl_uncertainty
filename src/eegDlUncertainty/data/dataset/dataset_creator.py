@@ -251,13 +251,9 @@ def process_eeg_file(sub_eeg, eeg_path, events, preprocess, nyquist, out_p, star
         raw_eeg_data.crop(tmin=start, tmax=end_time, verbose=False, include_tmax=False)
     # Check if we can start the recording from an earlier position...
     elif time_max >= preprocess['num_seconds_per_subject']:
+        start = time_max - preprocess['num_seconds_per_subject']
         # Check if we  start earlier in the recording
-        if start == preprocess['start']:
-            start = 0
-        else:
-            start -= preprocess['start']
-        raw_eeg_data.crop(tmin=start, tmax=(start+preprocess['num_seconds_per_subject']), verbose=False,
-                          include_tmax=False)
+        raw_eeg_data.crop(tmin=start, tmax=time_max, verbose=False, include_tmax=False)
     else:
         print(f"Subject {sub_eeg} data is too short, skipping...")
         return
