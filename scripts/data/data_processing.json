@@ -4,6 +4,7 @@
     "high_freq": 40,
     "num_seconds_per_subject": 300,
     "downsample": true,
+    "nyquist": 3,
     "artefact_removal": [],
     "start": 30
   },
@@ -12,5 +13,5 @@
     "eeg_events": "/home/tvetern/datasets/cau_eeg/caueeg-dataset/event/",
     "output_directory": "/home/tvetern/datasets/cau_eeg/numpy/"
   },
-  "use_multiprocessing": false
+  "use_multiprocessing": true
 }
