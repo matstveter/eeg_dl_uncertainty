@@ -1,6 +1,6 @@
 import os
 
-from eegDlUncertainty.data.dataset_creator import create_eeg_dataset
+from eegDlUncertainty.data.dataset.dataset_creator import create_eeg_dataset
 
 
 def main():
