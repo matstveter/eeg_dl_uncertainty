@@ -1,0 +1,4 @@
+{
+  "base_dataset_path": "/home/tvetern/datasets/cau_eeg/numpy/",
+  "label_dir": "/home/tvetern/datasets/cau_eeg/caueeg-dataset/"
+}
