@@ -25,7 +25,7 @@ class CauDataGenerator(Dataset):  # type: ignore[type-arg]
     def y(self) -> torch.Tensor:
         return self._y
 
-    def __len__(self) -> int:
+    def __len__(self) -> int:  # type: ignore[no-any-return]
         return self._x.size()[0]
 
     def __getitem__(self, index):
