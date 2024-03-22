@@ -6,7 +6,7 @@
     "learning_rate": 0.0001,
     "batch_size": 128,
     "epochs": 500,
-    "augmentations": []
+    "augmentations": ["smoothtimemask"]
   },
   "result_folder": "/home/tvetern/PhD/dl_uncertainty/results",
   "data": {

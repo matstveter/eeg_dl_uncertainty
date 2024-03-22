@@ -17,6 +17,6 @@
     "prediction_type": "pairwise",
     "which_one_vs_all_class": "normal",
     "pairwise": ["normal", "dementia"],
-    "num_seconds": 30
+    "num_seconds": 40
   }
 }

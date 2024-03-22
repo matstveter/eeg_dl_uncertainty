@@ -5,13 +5,13 @@ import torch.nn as nn
 import torch
 
 
-class BaseClassifier(abc.ABC, nn.Module):
+class BaseClassifier(nn.Module):
 
-    def __init__(self, name, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__()
 
         self._hyperparameters = kwargs
-        self._name = name
+        self._name = kwargs.get("name")
 
     @property
     def hyperparameters(self) -> Dict[str, Any]:
@@ -36,15 +36,3 @@ class BaseClassifier(abc.ABC, nn.Module):
         # Save
         torch.save(state, f"{path}")
 
-    @classmethod
-    def from_disk(cls, path: str):
-        # Get state
-        state = torch.load(path)
-
-        # Initialise model
-        model = cls(classifier_name=state["classifier_name"], **state["hyperparameters"])
-
-        # Load parameters
-        model.load_state_dict(state_dict=state["state_dict"], strict=True)
-
-        return model

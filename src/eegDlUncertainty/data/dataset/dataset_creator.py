@@ -5,6 +5,7 @@ import shutil
 import time
 from typing import Any, Dict
 import numpy as np
+import mne
 
 from eegDlUncertainty.data.utils import read_eeg_file, read_json_file
 
@@ -153,7 +154,7 @@ def process_eeg_data(config: Dict[str, Any], conf_path: str) -> None:
 
     # Check if there is an entry called eeg_events in the config file, if it is use the process-events function
     if "eeg_events" in config['file_paths']:
-        events = process_events(event_json_path=config['file_paths']['eeg_events'], event_key='Eyes Open')
+        events = process_events(event_json_path=config['file_paths']['eeg_events'], event_key='Eyes Closed')
     else:
         events = None
 
@@ -167,7 +168,7 @@ def process_eeg_data(config: Dict[str, Any], conf_path: str) -> None:
 
     start = time.perf_counter()
     if config['use_multiprocessing']:
-        with multiprocessing.Pool(processes=(multiprocessing.cpu_count() - 1)) as pool:
+        with multiprocessing.Pool(processes=(multiprocessing.cpu_count() - 3)) as pool:
             pool.starmap(process_eeg_file,
                          [(sub_eeg, eeg_path, events, preprocess, preprocess['nyquist'], outp_path, preprocess['start'])
                           for sub_eeg in eeg_files])
@@ -175,7 +176,7 @@ def process_eeg_data(config: Dict[str, Any], conf_path: str) -> None:
         for sub_eeg in eeg_files:
             process_eeg_file(sub_eeg=sub_eeg, eeg_path=eeg_path, events=events, preprocess=preprocess,
                              nyquist=preprocess['nyquist'], out_p=outp_path, start=preprocess['start'])
-    print(f"Processing finished, time used: {time.perf_counter()-start}")
+    print(f"Processing finished, time used: {time.perf_counter() - start}")
     shutil.copy(src=conf_path, dst=outp_path)
 
 
@@ -236,6 +237,9 @@ def process_eeg_file(sub_eeg, eeg_path, events, preprocess, nyquist, out_p, star
     >>> process_eeg_file("subject1.edf", "/data/eeg/", {"subject1": 100}, preprocess, 3, "/output/", 60)
     """
     raw_eeg_data = read_eeg_file(eeg_file_path=os.path.join(eeg_path, str(sub_eeg)))
+    if raw_eeg_data is None:
+        print("Raw file is None, returning")
+        return
     subject_id, _ = os.path.splitext(sub_eeg)
 
     # Use information from the event or use from the config file
@@ -274,8 +278,80 @@ def process_eeg_file(sub_eeg, eeg_path, events, preprocess, nyquist, out_p, star
 
     data = raw_eeg_data.get_data()
 
+    if ".set" in str(sub_eeg):
+        data = sub_select_channels(data)
+
     save_path = os.path.join(out_p, f"{subject_id}.npy")
     np.save(save_path, data)
+    print(f"{subject_id}: Done")
+
+
+def sub_select_channels(data: np.ndarray) -> np.ndarray:
+    """
+    Selects and reorders EEG data channels based on a predefined mapping.
+
+    This function iterates through a predefined dictionary `channel_map`, which contains EEG channel names as keys and
+    their respective indices as values. It then gathers the data for these channels, handles a special case for the 'Cz'
+     channel, and returns the reordered data as a NumPy array.
+
+    Parameters
+    ----------
+    data : array_like
+        The original EEG data array from which to select and reorder channels. The array should be indexed according
+        to channel indices.
+
+    Returns
+    -------
+    new_sub_selected_eeg : ndarray
+        A NumPy array containing the selected and reordered EEG channel data.
+
+    Notes
+    -----
+    The `channel_map` dictionary within the function maps channel names to indices. A special case is included for the
+    'Cz' channel, where it is mapped to a placeholder value in the dictionary but is assigned a specific index
+    within the function.
+
+    Examples
+    --------
+    Assume `data` is an array where each index corresponds to a channel's data. Calling `sub_select_channels(data)`
+    will return a new array with the channels reordered according to `channel_map`.
+
+    """
+    channel_map = {'Fp1': 22,
+                   'Fp2': 9,
+                   'F7': 33,
+                   'F3': 24,
+                   'Fz': 11,
+                   'F4': 124,
+                   'F8': 122,
+                   'FC3': 29,
+                   'FCz': 6,
+                   'FC4': 111,
+                   'T3': 45,
+                   'C3': 36,
+                   'C4': 104,
+                   'T4': 108,
+                   'CP3': 42,
+                   'CPz': 55,
+                   'CP4': 93,
+                   'T5': 58,
+                   'P3': 52,
+                   'Pz': 62,
+                   'P4': 92,
+                   'T6': 96,
+                   'O1': 70,
+                   'Cz': 'Cz'}
+
+    new_sub_selected_eeg = []
+    for key, val in channel_map.items():
+        if val == "Cz":
+            channel_key = 128
+        else:
+            channel_key = val
+        new_sub_selected_eeg.append(data[channel_key])
+    new_sub_selected_eeg = np.array(new_sub_selected_eeg)
+
+    return new_sub_selected_eeg
 
 
 def create_eeg_dataset(conf_path: str):

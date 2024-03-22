@@ -62,6 +62,8 @@ def read_eeg_file(eeg_file_path: str):
     if ext.lower() == ".edf":  # Ensure extension comparison is case-insensitive
         return mne.io.read_raw_edf(input_fname=eeg_file_path, preload=True, verbose=False,
                                    exclude=['EKG', 'Photic'])
+    elif ext.lower() == ".set":
+        return mne.io.read_raw_eeglab(input_fname=eeg_file_path, verbose=False, preload=True)
     else:
         raise NotImplementedError(f"Unsupported file type for {eeg_file_path}. Only EDF files are supported.")
 

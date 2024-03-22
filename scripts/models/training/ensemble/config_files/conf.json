@@ -1,6 +1,7 @@
 {
   "model": {
-    "name": "InceptionNetwork"
+    "name": ["InceptionNetwork"],
+    "num_ensembles": 5
   },
   "hyperparameters": {
     "learning_rate": 0.0001,
@@ -14,7 +15,7 @@
     "overlap": false,
     "version": 1,
     "eeg_epochs": 1,
-    "prediction_type": "pairwise",
+    "prediction_type": "normal",
     "which_one_vs_all_class": "normal",
     "pairwise": ["normal", "dementia"],
     "num_seconds": 30

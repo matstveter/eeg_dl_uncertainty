@@ -41,7 +41,7 @@ def get_augmentations(aug_names: List[str], probability: float, random_state: Op
     aug_list = []
     for name in aug_names:
         if name in ('gaussiannoise', 'GaussianNoise'):
-            aug_list.append(GaussianNoise(probability=probability, std=0.5, random_state=random_state))
+            aug_list.append(GaussianNoise(probability=probability, std=0.1, random_state=random_state))
         elif name in ('timereverse', 'TimeReverse'):
             aug_list.append(TimeReverse(probability=probability, random_state=random_state))
         elif name in ('signflip', 'SignFlip'):

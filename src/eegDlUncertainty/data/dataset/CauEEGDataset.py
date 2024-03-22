@@ -10,7 +10,8 @@ from tqdm import tqdm
 
 class CauEEGDataset:
 
-    def __init__(self, dataset_version, targets, eeg_len_seconds, use_predefined_split=True, num_channels=19, epochs=1):
+    def __init__(self, dataset_version, targets: str, eeg_len_seconds: int, prediction_type: str, which_one_vs_all: str,
+                 pairwise: str, use_predefined_split: bool = True, num_channels: int = 19, epochs: int = 1):
         # Read in the dataset config
         config = self._read_config(json_path=os.path.join(os.path.dirname(__file__), "dataset_config.json"))
 
@@ -21,6 +22,16 @@ class CauEEGDataset:
 
         self._task_name = loaded_dict['task_name']
         self._class_name_to_label = loaded_dict['class_name_to_label']
+
+        # Prediction related
+        self._prediction_type = prediction_type
+        self._which_one_vs_all = which_one_vs_all
+        self._pairwise = pairwise
+
+        if self._prediction_type == "normal" and len(self._class_name_to_label) == 3:
+            self._num_classes = 3
+        else:
+            self._num_classes = 1
 
         if use_predefined_split:
             self._train_split = self._get_participant_info(dataset_split=loaded_dict['train_split'])
@@ -53,6 +64,18 @@ class CauEEGDataset:
 
         # Set default to 19 channels
         self._num_channels = num_channels
+
+    @property
+    def eeg_len(self):
+        return self._eeg_len
+
+    @property
+    def num_channels(self):
+        return self._num_channels
+
+    @property
+    def num_classes(self):
+        return self._num_classes
 
     @staticmethod
     def _merge_splits(train_split: Dict[str, Dict[str, Any]], val_split: Dict[str, Dict[str, Any]],
@@ -255,40 +278,40 @@ class CauEEGDataset:
         val_subjects = tuple(self._val_split)
         test_subjects = tuple(self._test_split)
 
+        if self._prediction_type == "pairwise":
+            train_subjects = self._get_pairwise_dataset(data_set=train_subjects)
+            val_subjects = self._get_pairwise_dataset(data_set=val_subjects)
+            test_subjects = self._get_pairwise_dataset(data_set=test_subjects)
+
         return train_subjects, val_subjects, test_subjects
 
-    def load_targets(self, subjects: Tuple[str, ...]) -> numpy.ndarray:  # type: ignore[type-arg]
-        """
-        Loads target data for a specified set of subjects based on the current task.
+    def load_targets(self, subjects: Tuple[str, ...]) -> numpy.ndarray:  # type: ignore[type-arg, return]
 
-        Depending on the task name set in `_task_name`, this method delegates the loading of target data
-        to either `_load_abnormal` or `_load_dementia`. It supports tasks related to 'CAUEEG-Abnormal benchmark'
-        and 'CAUEEG-Dementia benchmark'. If an unrecognized task name is provided, it raises a KeyError.
-
-        Parameters
-        ----------
-        subjects : Tuple[str, ...]
-            A tuple of subject identifiers for which to load the target data.
-
-        Returns
-        -------
-        numpy.ndarray
-            An array of target data corresponding to the provided subjects.
-
-        Raises
-        ------
-        KeyError
-            If the task name `_task_name` is not recognized as a valid task.
-        """
         class_labels = np.array([self._merged_splits[sub]['class_label'] for sub in subjects])
 
         if self._task_name == 'CAUEEG-Abnormal benchmark':
             return class_labels
         elif self._task_name == 'CAUEEG-Dementia benchmark':
-            one_hot_class_labels: numpy.ndarray = torch.nn.functional.one_hot(  # type: ignore[type-arg]
-                torch.from_numpy(class_labels), num_classes=len(self._class_name_to_label)).numpy()
-            return one_hot_class_labels
+            if self._prediction_type == "normal":
+                one_hot_class_labels: numpy.ndarray = torch.nn.functional.one_hot(  # type: ignore[type-arg]
+                    torch.from_numpy(class_labels), num_classes=len(self._class_name_to_label)).numpy()
+                return one_hot_class_labels
+            elif self._prediction_type == "one_vs_all":
+                if self._which_one_vs_all == "normal":
+                    class_lab = 0
+                elif self._which_one_vs_all == "mci":
+                    class_lab = 1
+                elif self._which_one_vs_all == "dementia":
+                    class_lab = 2
+                else:
+                    raise KeyError("Unrecognized class name for one-vs-all predictions")
+                class_labels = np.array([1 if c_lab == class_lab else 0 for c_lab in class_labels])
 
+                return class_labels
+            elif self._prediction_type == "pairwise":
+                class_labels = np.array([0 if self._pairwise[0] == self._merged_splits[sub]['class_name'].lower() else 1
+                                         for sub in subjects])
+                return class_labels
         else:
             raise KeyError(f"Unrecognized task name: {self._task_name}")
 
@@ -353,10 +376,17 @@ class CauEEGDataset:
             # Load the subject numpy file
             npy_data = numpy.load(subject_eeg_data_path)
 
+            if self._eeg_len > npy_data.shape[1]:
+                raise ValueError("Specified EEG length is longer than the actual recording.")
+            else:
+                npy_data = npy_data[:, 0: self._eeg_len]
+
             # Plotting function
             if plot:
                 raw = mne.io.RawArray(data=npy_data, info=self.__get_eeg_info(), verbose=False)
                 raw.plot(block=True)
+
+            # npy_data = self.__normalize_data(data=npy_data, method='subject')
 
             # Add the data to the empty numpy array
             data[i] = npy_data
@@ -365,6 +395,27 @@ class CauEEGDataset:
         # Close the progress bare, this could probably be avoided with a with statement instead, but...
         pbar.close()
         return data
+
+    def __normalize_data(self, data, method='channel'):
+        """
+        Normalize the data to the range [-1, 1].
+        If method is 'channel', normalization is done channel-wise.
+        If method is 'subject', normalization is done across all channels for the subject.
+        """
+        if method == 'channel':
+            # Channel-wise normalization
+            min_val = np.min(data, axis=1, keepdims=True)
+            max_val = np.max(data, axis=1, keepdims=True)
+        elif method == 'subject':
+            # Subject-wise normalization
+            min_val = np.min(data)
+            max_val = np.max(data)
+        else:
+            raise ValueError("Normalization method must be 'channel' or 'subject'.")
+
+        # Normalize to [-1, 1]
+        return 2 * (data - min_val) / (max_val - min_val) - 1
+
 
     @staticmethod
     def _read_config(json_path: str):
@@ -402,3 +453,47 @@ class CauEEGDataset:
                     'FZ-AVG', 'CZ-AVG', 'PZ-AVG']
         sfreq = self._preprocessing_steps['high_freq'] * self._preprocessing_steps['nyquist']
         return mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types="eeg")
+
+    def _get_pairwise_dataset(self, data_set: Tuple[str, ...]) -> Tuple[str, ...]:
+        """
+        Filters a dataset tuple to include only the items that belong to a specified pair of classes.
+
+        This method checks each item in the given dataset to determine if it belongs to one of two predefined
+        classes specified in the object's `_pairwise` attribute. Only items that match these classes are included
+        in the new dataset tuple that is returned.
+
+        Parameters
+        ----------
+        data_set : Tuple[str, ...]
+            A tuple containing the dataset items to be filtered. Each item is expected to be a string identifier
+            that can be used to look up class information in the object's `_merged_splits` attribute.
+
+        Returns
+        -------
+        Tuple[str, ...]
+            A tuple containing the filtered set of dataset items. Each item in the tuple is a string identifier
+            for items that belong to the specified pair of classes.
+
+        Raises
+        ------
+        ValueError
+            If the `_pairwise` attribute does not contain exactly two classes, indicating that the method cannot
+            proceed with the filtering as it requires exactly two classes to compare against.
+
+        Notes
+        -----
+        The method assumes that `self._pairwise` is a collection (e.g., list or set) containing the names of
+        two classes to filter the dataset by. It also assumes that `self._merged_splits` is a dictionary with
+        dataset item identifiers as keys and dictionaries as values, where each dictionary contains a 'class_name'
+        key with a string value representing the item's class name.
+        """
+        new_set = []
+
+        if len(self._pairwise) != 2:
+            raise ValueError("The specified pair in the config file does not contain two classes!")
+
+        for sub in data_set:
+            if self._merged_splits[sub]['class_name'].lower() in self._pairwise:
+                new_set.append(sub)
+
+        return tuple(new_set)

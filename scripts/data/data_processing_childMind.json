@@ -1,0 +1,16 @@
+{
+  "preprocessing": {
+    "low_freq": 0.1,
+    "high_freq": 40,
+    "num_seconds_per_subject": 300,
+    "downsample": true,
+    "nyquist": 3,
+    "artefact_removal": [],
+    "start": 30
+  },
+  "file_paths": {
+    "eeg_data": "/media/hdd/Datasets/prep_child/data/",
+    "output_directory": "/home/tvetern/datasets/childMind/numpy/"
+  },
+  "use_multiprocessing": false
+}
