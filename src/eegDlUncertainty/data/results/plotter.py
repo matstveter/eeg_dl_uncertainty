@@ -2,6 +2,7 @@ import os.path
 import warnings
 
 import matplotlib.pyplot as plt
+import mlflow
 import seaborn as sns
 
 
@@ -37,14 +38,19 @@ class Plotter:
 
     def _print_test_results(self):
         filename = f"{self._save_path}/test_results.txt"
-
         with open(filename, "w") as file:
+            # First section
             for key, val in self._test_dict.items():
-                file.write(f"{key.upper()}\t:\t{val}\n")
+                val_str = val[0] if isinstance(val, list) and len(val) > 0 else val
+                file.write(f"{key.upper():<15}: {val_str}\n")
 
-            file.write("\n\nBest Model: \n")
+            file.write("\nBest Model:\n")
+            # Best Model section
             for key, val in self._test_dict_best_model.items():
-                file.write(f"{key.upper()}\t:\t{val}\n")
+                val_str = val[0] if isinstance(val, list) and len(val) > 0 else val
+                file.write(f"{key.upper():<15}: {val_str}\n")
+
+        mlflow.log_artifact(filename)
 
     def _plot_loss(self):
         plt.figure(figsize=(10, 6))
@@ -90,6 +96,7 @@ class Plotter:
         if self._save_path:
             full_path = f"{self._save_path}/{filename}.pdf"
             plt.savefig(full_path, format="pdf")
+            mlflow.log_artifact(full_path)
         else:
             plt.show()
         plt.close()
