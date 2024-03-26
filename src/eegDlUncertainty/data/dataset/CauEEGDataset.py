@@ -388,7 +388,7 @@ class CauEEGDataset:
 
             # Plotting function
             if plot:
-                raw = mne.io.RawArray(data=npy_data, info=self.__get_eeg_info(), verbose=False)
+                raw = mne.io.RawArray(data=npy_data, info=self.get_eeg_info(), verbose=False)
                 raw.plot(block=True)
 
             # npy_data = self.__normalize_data(data=npy_data, method='subject')
@@ -426,7 +426,7 @@ class CauEEGDataset:
         with open(json_path) as json_reader:
             return json.load(json_reader)
 
-    def __get_eeg_info(self):
+    def get_eeg_info(self):
         """
         Generate EEG info object with predefined channel names and sampling frequency.
 
