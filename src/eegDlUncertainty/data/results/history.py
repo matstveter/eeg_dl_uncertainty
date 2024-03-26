@@ -2,6 +2,7 @@ import os.path
 import pickle
 from typing import Any, Dict, List
 
+import mlflow
 import numpy as np
 import torch
 from sklearn.metrics import (roc_auc_score, f1_score, cohen_kappa_score, precision_score, recall_score,
@@ -80,7 +81,7 @@ class History:
         self._accuracy.append(self._calculate_accuracy(y_pred=y_pred, y_true=y_true))
 
     def print_metrics(self) -> None:
-        if self._set_name == "test":
+        if "test" in self._set_name:
             print("\n\n")
         print(f"{self._set_name.upper()}: Loss: {self._loss[-1]:.4f}"
               f"  Accuracy: {self._accuracy[-1]:.2f}"
@@ -95,7 +96,7 @@ class History:
         if self.verbose:
             self.print_metrics()
 
-        if self._set_name != "test":
+        if not "test" in self._set_name:
             self.epoch_y_true = []
             self.epoch_y_pred = []
             self.epoch_loss = 0
@@ -153,3 +154,16 @@ class History:
             y_true_numpy = np.array(self.epoch_y_true)
 
         return y_pred_numpy, y_true_numpy
+
+    def save_to_mlflow(self):
+        # Assuming 'epochs' is defined or passed to this method. Alternatively,
+        # infer from one of the metric lengths.
+        epochs = len(self._accuracy)  # For example, using the length of the accuracy list
+
+        metric_names = ["loss", "accuracy", "precision", "recall", "f1", "auc", "kappa", "mcc"]
+
+        for epoch in range(epochs):
+            for metric_name in metric_names:
+                metric_value_list = getattr(self, f"_{metric_name}")
+                if metric_value_list:  # Check if the metric list is not empty
+                    mlflow.log_metric(f"{self._set_name}_{metric_name}", metric_value_list[epoch], step=epoch)
