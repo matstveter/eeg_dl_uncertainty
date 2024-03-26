@@ -13,22 +13,26 @@ from eegDlUncertainty.models.get_models import get_models
 
 
 class MainClassifier(abc.ABC, nn.Module):
-    def __init__(self, classifier_name: str, pretrained=None, **kwargs):
+    def __init__(self, model_name: str, pretrained=None, **kwargs):
         super().__init__()
         if pretrained is not None:
             self.classifier = self.from_disk(path=pretrained)
         else:
-            self.classifier = get_models(model_name=classifier_name, **kwargs)
+            self.classifier = get_models(model_name=model_name, **kwargs)
             hyperparameters = kwargs.copy()
-            hyperparameters["classifier_name"] = classifier_name
+            # hyperparameters['classifier_name'] = model_name
             self._hyperparameters = hyperparameters
-            self._name = classifier_name
+            self._name = model_name
 
             self._model_path = os.path.join(kwargs.get("save_path"), "model")
             if not os.path.exists(self._model_path):
                 os.makedirs(self._model_path, exist_ok=True)
 
-            self._learning_rate = kwargs.get("lr")
+            self._learning_rate = kwargs.get("learning_rate")
+
+    @property
+    def hyperparameters(self):
+        return self._hyperparameters
 
     def model_path(self, with_ext=True):
         if with_ext:
