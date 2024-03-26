@@ -27,6 +27,7 @@ class CauEEGDataset:
         self._prediction_type = prediction_type
         self._which_one_vs_all = which_one_vs_all
         self._pairwise = pairwise
+        self._name = "CAUEEG"
 
         if self._prediction_type == "normal" and len(self._class_name_to_label) == 3:
             self._num_classes = 3
@@ -64,6 +65,10 @@ class CauEEGDataset:
 
         # Set default to 19 channels
         self._num_channels = num_channels
+
+    @property
+    def name(self):
+        return self._name
 
     @property
     def eeg_len(self):
@@ -415,7 +420,6 @@ class CauEEGDataset:
 
         # Normalize to [-1, 1]
         return 2 * (data - min_val) / (max_val - min_val) - 1
-
 
     @staticmethod
     def _read_config(json_path: str):

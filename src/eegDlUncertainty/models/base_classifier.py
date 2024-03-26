@@ -1,6 +1,6 @@
 import abc
 from typing import Any, Dict
-
+import mlflow
 import torch.nn as nn
 import torch
 
@@ -29,10 +29,10 @@ class BaseClassifier(nn.Module):
         Returns: Nothing
 
         """
+        print(self._name)
         # Get state (everything needed to load the model)
         state = {"state_dict": self.state_dict(), "classifier_name": self._name,
                  "hyperparameters": self.hyperparameters}
 
         # Save
         torch.save(state, f"{path}")
-
