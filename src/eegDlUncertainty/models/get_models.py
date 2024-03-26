@@ -11,4 +11,4 @@ def get_models(model_name, **kwargs):
         if model_name == a_m.__name__:
             return a_m(**kwargs)
     else:
-        raise KeyError(f"Model name not recognized, available models: {available_models}")
+        raise KeyError(f"Model name {model_name} not recognized, available models: {available_models}")
