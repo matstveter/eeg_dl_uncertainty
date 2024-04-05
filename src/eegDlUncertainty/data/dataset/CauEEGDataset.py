@@ -1,6 +1,8 @@
 import json
 import os
 from typing import Any, Dict, List, Tuple
+
+import mlflow
 import numpy
 import mne
 import numpy as np
@@ -10,8 +12,10 @@ from tqdm import tqdm
 
 class CauEEGDataset:
 
-    def __init__(self, dataset_version, targets: str, eeg_len_seconds: int, prediction_type: str, which_one_vs_all: str,
-                 pairwise: str, use_predefined_split: bool = True, num_channels: int = 19, epochs: int = 1):
+    def __init__(self, *, dataset_version, targets: str, eeg_len_seconds: int, prediction_type: str,
+                 which_one_vs_all: str,
+                 pairwise: str, epochs, overlapping_epochs, use_predefined_split: bool = True,
+                 num_channels: int = 19):
         # Read in the dataset config
         config = self._read_config(json_path=os.path.join(os.path.dirname(__file__), "dataset_config.json"))
 
@@ -58,10 +62,18 @@ class CauEEGDataset:
             raise KeyError(f"Specified dataset version: {dataset_version} does not exist, "
                            f"potential datasets are: {os.listdir(config.get('base_dataset_path'))}")
 
-        # Calculate the number of actual time steps based on seconds, and then the current sampling frequency
-        self._eeg_len = (eeg_len_seconds *
-                         (self._preprocessing_steps['high_freq'] * self._preprocessing_steps['nyquist']))
         self._epochs = epochs
+        self._overlapping_epochs = overlapping_epochs
+        self._eeg_len = int(eeg_len_seconds * self.get_eeg_info()['sfreq'])
+        self._num_seconds = eeg_len_seconds
+
+        if self._overlapping_epochs:
+            duration = (self._epochs - 1) * (eeg_len_seconds / 2)
+        else:
+            duration = self._epochs * eeg_len_seconds
+
+        assert duration < self._preprocessing_steps['num_seconds_per_subject'], \
+            "Total number of seconds with epochs and epoch len is exceeds the total amount of seconds, idiot!"
 
         # Set default to 19 channels
         self._num_channels = num_channels
@@ -290,17 +302,67 @@ class CauEEGDataset:
 
         return train_subjects, val_subjects, test_subjects
 
-    def load_targets(self, subjects: Tuple[str, ...]) -> numpy.ndarray:  # type: ignore[type-arg, return]
+    def load_targets(self, subjects: Tuple[str, ...], split=None) -> numpy.ndarray:  # type: ignore[type-arg, return]
+        """
+        Load target class labels for a given set of subjects based on the current task.
 
-        class_labels = np.array([self._merged_splits[sub]['class_label'] for sub in subjects])
+        This method handles different tasks by loading and possibly transforming class labels
+        for the provided subjects. It supports tasks like 'CAUEEG-Abnormal benchmark' and
+        'CAUEEG-Dementia benchmark', with different prediction types such as 'normal',
+        'one_vs_all', and 'pairwise'. Depending on the task and prediction type, this method
+        may apply one-hot encoding or binary transformation to the labels. It also optionally
+        gathers label statistics if a split is provided.
+
+        Parameters
+        ----------
+        subjects : Tuple[str, ...]
+            A tuple of subject identifiers for which to load the target labels.
+        split : str, optional
+            The dataset split (e.g., 'train', 'test', 'validation') for which to load and
+            possibly report label statistics. If not specified, statistics are not gathered.
+
+        Returns
+        -------
+        numpy.ndarray
+            An array of processed class labels for the given subjects. The processing depends
+            on the current task and prediction type, including transformations like one-hot
+            encoding or binary classification adjustment.
+
+        Raises
+        ------
+        KeyError
+            If the task name or class name for one-vs-all predictions is unrecognized.
+
+        Side Effects
+        ------------
+        Calls `self.get_label_statistics` if a `split` is provided, to compute and log label
+        statistics for the current dataset split.
+
+        Notes
+        -----
+        This method relies on internal attributes such as `_task_name`, `_prediction_type`,
+        and others to determine the appropriate processing of class labels for the subjects.
+        """
+        if split != "train":
+            class_labels = np.array([self._merged_splits[sub]['class_label'] for sub in subjects])
+        else:
+            # Repeat the classes num_epochs times....
+            class_labels = np.array([self._merged_splits[sub]['class_label'] for sub in subjects])
+            class_labels = np.repeat(class_labels, self._epochs)
 
         if self._task_name == 'CAUEEG-Abnormal benchmark':
+            if split:
+                self.get_label_statistics(class_labels=class_labels, classes={"0": 'Normal', "1": 'Abnormal'},
+                                          split=split)
             return class_labels
         elif self._task_name == 'CAUEEG-Dementia benchmark':
             if self._prediction_type == "normal":
-                one_hot_class_labels: numpy.ndarray = torch.nn.functional.one_hot(  # type: ignore[type-arg]
+                class_labels: numpy.ndarray = torch.nn.functional.one_hot(  # type: ignore[type-arg]
                     torch.from_numpy(class_labels), num_classes=len(self._class_name_to_label)).numpy()
-                return one_hot_class_labels
+                if split:
+                    self.get_label_statistics(class_labels=class_labels,
+                                              classes={"0": "Normal", "1": "MCI", "2": "Dementia"},
+                                              split=split)
             elif self._prediction_type == "one_vs_all":
                 if self._which_one_vs_all == "normal":
                     class_lab = 0
@@ -311,16 +373,25 @@ class CauEEGDataset:
                 else:
                     raise KeyError("Unrecognized class name for one-vs-all predictions")
                 class_labels = np.array([1 if c_lab == class_lab else 0 for c_lab in class_labels])
+                if split:
+                    self.get_label_statistics(class_labels=class_labels,
+                                              classes={"0": "Other", "1": self._which_one_vs_all},
+                                              split=split)
 
-                return class_labels
             elif self._prediction_type == "pairwise":
                 class_labels = np.array([0 if self._pairwise[0] == self._merged_splits[sub]['class_name'].lower() else 1
                                          for sub in subjects])
-                return class_labels
+                if split:
+                    self.get_label_statistics(class_labels=class_labels, classes={"0": self._pairwise[0],
+                                                                                  "1": self._pairwise[1]},
+                                              split=split)
+
+            return class_labels
         else:
             raise KeyError(f"Unrecognized task name: {self._task_name}")
 
-    def load_eeg_data(self, subjects: Tuple[str, ...], plot: bool = False) -> numpy.ndarray:  # type: ignore[type-arg]
+    def load_eeg_data(self, subjects: Tuple[str, ...], split=None,
+                      plot: bool = False, random_epochs=True) -> numpy.ndarray:  # type: ignore[type-arg]
         """
         Load EEG data for a given list of subjects and optionally plot the raw EEG data.
 
@@ -335,6 +406,11 @@ class CauEEGDataset:
 
         Parameters
         ----------
+        random_epochs: bool
+            default is true, when selecting epochs, it selects a random set of epochs, else it will take the
+            self.epoch first epochs
+        split: str
+            whcich split, train, test or val
         subjects : list
             A list of subject identifiers whose EEG data is to be loaded.
         plot : bool, optional
@@ -365,12 +441,17 @@ class CauEEGDataset:
         >>> self.load_eeg_data(['subject1', 'subject2'], plot=True)
         # This will load the EEG data for 'subject1' and 'subject2', plot the raw data, and return the data array.
         """
-        if self._epochs == 1 or self._epochs == 0:
+
+        if split != "train":
+            num_epochs = 1
+        else:
+            num_epochs = self._epochs
+        use_epochs = False
+        if num_epochs == 1 or num_epochs == 0:
             data = numpy.zeros(shape=(len(subjects), self._num_channels, self._eeg_len))
         else:
-            # data = numpy.zeros(shape=(len(subjects), self._epochs, self._num_channels, self._eeg_len))
-            # transform to mne raw then convert using the functionality from mne?
-            raise NotImplementedError("EEG epochs set to other than 1, missing implementation!")
+            use_epochs = True
+            data = numpy.zeros(shape=(len(subjects) * num_epochs, self._num_channels, self._eeg_len))
 
         # Progress bar
         pbar = tqdm(total=len(subjects), desc="Loading", unit="subjects", colour='green')
@@ -381,11 +462,6 @@ class CauEEGDataset:
             # Load the subject numpy file
             npy_data = numpy.load(subject_eeg_data_path)
 
-            if self._eeg_len > npy_data.shape[1]:
-                raise ValueError("Specified EEG length is longer than the actual recording.")
-            else:
-                npy_data = npy_data[:, 0: self._eeg_len]
-
             # Plotting function
             if plot:
                 raw = mne.io.RawArray(data=npy_data, info=self.get_eeg_info(), verbose=False)
@@ -393,15 +469,42 @@ class CauEEGDataset:
 
             # npy_data = self.__normalize_data(data=npy_data, method='subject')
 
-            # Add the data to the empty numpy array
-            data[i] = npy_data
-            pbar.update(1)
+            if use_epochs:
+                raw = mne.io.RawArray(data=npy_data, info=self.get_eeg_info(), verbose=False)
+                overlap = (self._eeg_len / 2) / raw.info['sfreq'] if self._overlapping_epochs else 0
+
+                epochs = mne.make_fixed_length_epochs(raw=raw, duration=self._num_seconds, overlap=overlap,
+                                                      preload=True, verbose=False)
+                epoch_npy_data = epochs.get_data(copy=False)
+
+                if random_epochs:
+                    random_indices = np.random.choice(epoch_npy_data.shape[0], size=self._epochs, replace=False)
+                    npy_data = epoch_npy_data[random_indices, :, :]
+                else:
+                    npy_data = epoch_npy_data[:self._epochs, :, :]
+
+                cur_index = 0
+                for j in range((i * num_epochs), (i * num_epochs) + num_epochs):
+                    data[j] = npy_data[cur_index]
+                    cur_index += 1
+                pbar.update(1)
+            else:
+                if self._eeg_len > npy_data.shape[1]:
+                    raise ValueError("Specified EEG length is longer than the actual recording.")
+
+                npy_data = npy_data[:, 0: self._eeg_len]
+
+                # Add the data to the empty numpy array
+                data[i] = npy_data
+                pbar.update(1)
 
         # Close the progress bare, this could probably be avoided with a with statement instead, but...
         pbar.close()
+        print(data.shape)
         return data
 
-    def __normalize_data(self, data, method='channel'):
+    @staticmethod
+    def __normalize_data(data, method='channel'):
         """
         Normalize the data to the range [-1, 1].
         If method is 'channel', normalization is done channel-wise.
@@ -501,3 +604,60 @@ class CauEEGDataset:
                 new_set.append(sub)
 
         return tuple(new_set)
+
+    @staticmethod
+    def get_label_statistics(class_labels, classes, split):
+        """
+        Calculate and log statistics for given class labels within a dataset split.
+
+        This static method computes the count and proportion of each class label
+        in a given set of labels, based on a provided mapping of class identifiers to names.
+        It logs these statistics using the provided split name for context. The results are
+        printed to standard output and logged as parameters in MLflow with detailed statistics,
+        including counts and percentages of each class.
+
+        Parameters
+        ----------
+        class_labels : Iterable
+            An iterable (e.g., list or array) of class labels for which statistics are to be computed.
+        classes : dict
+            A dictionary mapping class identifiers (as strings) to class names. This mapping is used
+            to translate class labels into human-readable class names for reporting.
+        split : str
+            The name of the dataset split (e.g., 'train', 'validation', 'test') for which statistics
+            are being calculated. This is used for labeling purposes in the output.
+
+        Raises
+        ------
+        KeyError
+            If an unrecognized class label is encountered, indicating a mismatch between the provided
+            class labels and the class identifier-to-name mapping.
+
+        Side Effects
+        ------------
+        - Prints class label statistics (count and proportion) to standard output, formatted by the
+          dataset split and class names.
+        - Logs the computed statistics to MLflow, categorized under a parameter named after the
+          dataset split and the phrase "Class Statistics".
+        """
+        label_counts = {class_name: 0 for class_name in classes.values()}
+
+        for c in class_labels:
+            if c.shape[0] == 3:
+                cl_lab = np.argmax(c)
+            else:
+                cl_lab = c
+
+            if str(cl_lab) in classes:
+                label_counts[classes[str(cl_lab)]] += 1
+            else:
+                raise KeyError(f"Unrecognized key: {cl_lab} in dict: {classes}")
+
+        total_labels = len(class_labels)
+        stats = {}
+        for class_name, count in label_counts.items():
+            proportion = (count / total_labels) * 100
+            print(f"{split.upper()} - {class_name.upper()}:\n\tCount: {count}\n\tPropo: {proportion:.2f}")
+            stats[f"{class_name.upper()}"] = f" count: {count}, %: {proportion}"
+
+        mlflow.log_param(f"Class Statistics - {split.upper()}", stats)

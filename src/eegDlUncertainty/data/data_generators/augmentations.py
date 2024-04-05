@@ -3,8 +3,7 @@ from braindecode.augmentation import GaussianNoise, TimeReverse, SignFlip, FTSur
     ChannelsDropout, SmoothTimeMask, BandstopFilter, Transform
 
 
-def get_augmentations(aug_names: List[str], probability: float, random_state: Optional[int] = None,
-                      gaus_std: float = None) -> List[Transform]:
+def get_augmentations(aug_names: List[str], probability: float, random_state: Optional[int] = None) -> List[Transform]:
     """
     Constructs a list of augmentation objects based on the specified augmentation names. Each augmentation
     is initialized with a given probability and an optional random state for reproducibility. Supported augmentations
@@ -14,7 +13,6 @@ def get_augmentations(aug_names: List[str], probability: float, random_state: Op
 
     Parameters
     ----------
-    gaus_std
     aug_names : List[str]
         A list of strings specifying the names of the augmentations to be created. Accepted names include various
         case-insensitive versions of 'GaussianNoise', 'TimeReverse', 'SignFlip', 'FTSurrogate', 'ChannelsShuffle',

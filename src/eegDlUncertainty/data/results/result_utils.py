@@ -1,8 +1,6 @@
 import os
 from typing import List
-
 import numpy as np
-import torch
 from scipy.stats import mode
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 

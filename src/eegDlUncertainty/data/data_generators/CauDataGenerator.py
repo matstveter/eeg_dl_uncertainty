@@ -7,10 +7,11 @@ from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
 
 
 class CauDataGenerator(Dataset):  # type: ignore[type-arg]
-    def __init__(self, subjects: Tuple[str, ...], dataset: CauEEGDataset, device: Optional[torch.device] = None):
+    def __init__(self, subjects: Tuple[str, ...], split: str, dataset: CauEEGDataset,
+                 device: Optional[torch.device] = None):
         super().__init__()
-        self._x = torch.tensor(dataset.load_eeg_data(subjects=subjects), dtype=torch.float32)
-        targets = torch.tensor(dataset.load_targets(subjects=subjects), dtype=torch.float32)
+        self._x = torch.tensor(dataset.load_eeg_data(subjects=subjects, split=split), dtype=torch.float32)
+        targets = torch.tensor(dataset.load_targets(subjects=subjects, split=split), dtype=torch.float32)
 
         if len(targets.shape) == 1:
             targets = targets.unsqueeze(1)

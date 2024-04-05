@@ -1,9 +1,9 @@
-from typing import Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import mlflow
 
 
-def get_experiment_name(prediction_type: str, pairwise: Tuple[str, str], one_class: str,
-                        experiment_name: str = None) -> None:
+def get_experiment_name(prediction_type: str, pairwise: List[str], one_class: str,
+                        experiment_name: Optional[str] = None) -> None:
     """
     Determines and sets the name of the current machine learning experiment based on the type of prediction,
     and optionally, the specific classes involved in the prediction. It sets the experiment name in mlflow,
@@ -59,11 +59,11 @@ def get_experiment_name(prediction_type: str, pairwise: Tuple[str, str], one_cla
     mlflow.set_experiment(exp_name)
 
 
-def add_config_information(config: dict, dataset: str) -> None:
+def add_config_information(config: Dict[str, Any], dataset: str) -> None:
     """
-    Logs configuration information and dataset name for the current MLflow experiment. 
+    Logs configuration information and dataset name for the current MLflow experiment.
 
-    This function iterates through a configuration dictionary to log various experiment parameters 
+    This function iterates through a configuration dictionary to log various experiment parameters
     in MLflow. It handles special cases for logging 'pairwise' and 'one_vs_all' prediction types, including
     logging additional parameters that specify the classes involved in these prediction types. It ensures
     that configuration related to the prediction types is logged in a structured way.
@@ -71,9 +71,9 @@ def add_config_information(config: dict, dataset: str) -> None:
     Parameters
     ----------
     config : dict
-        A dictionary containing key-value pairs of configuration parameters for the experiment. 
-        Expected keys include 'prediction_type', 'pairwise_class', and 'which_one_vs_all_class' 
-        among potentially others. The function specially handles 'prediction_type' to log additional 
+        A dictionary containing key-value pairs of configuration parameters for the experiment.
+        Expected keys include 'prediction_type', 'pairwise_class', and 'which_one_vs_all_class'
+        among potentially others. The function specially handles 'prediction_type' to log additional
         parameters based on its value.
     dataset : str
         The name of the dataset being used in the experiment. This is logged as a separate parameter.
@@ -85,18 +85,6 @@ def add_config_information(config: dict, dataset: str) -> None:
     - The function will skip logging 'which_one_vs_all_class' and 'pairwise_class' directly if they are not
       relevant to the 'prediction_type', to avoid cluttering the experiment's logged parameters with
       unnecessary information.
-
-    Examples
-    --------
-    >>> config = {"prediction_type": "pairwise", "pairwise_class": ("class1", "class2"), "model": "SVM"}
-    >>> add_config_information(config, "dataset_name")
-    This logs 'Dataset' as 'dataset_name', 'pair' as the tuple of classes in 'pairwise_class', 
-    and 'model' as 'SVM'. It does not log 'prediction_type' or 'pairwise_class' directly as separate entries.
-
-    >>> config = {"prediction_type": "one_vs_all", "which_one_vs_all_class": "class1", "model": "CNN"}
-    >>> add_config_information(config, "dataset_name")
-    This logs 'Dataset' as 'dataset_name', 'prediction_type' as 'one_vs_all', 'Focus Class' as 'class1',
-    and 'model' as 'CNN'. It does not log 'which_one_vs_all_class' directly to avoid redundancy.
     """
     mlflow.log_param("Dataset", dataset)
 
@@ -106,15 +94,15 @@ def add_config_information(config: dict, dataset: str) -> None:
                 mlflow.log_param('pair', config['pairwise_class'])
             elif val == "one_vs_all":
                 mlflow.log_param(key, val)
-                mlflow.log_param("Focus Class", config["which_one_vs_all_class"])
+                mlflow.log_param("Focus Class", config["which_one_vs_all"])
             continue
-        elif key == "which_one_vs_all_class" or key == "pairwise_class":
+        elif key == "which_one_vs_all" or key == "pairwise_class":
             continue
         else:
             mlflow.log_param(key, val)
 
 
-def ensure_experiment_exists(experiment_name: str) -> int:
+def ensure_experiment_exists(experiment_name: str) -> str:
     """
     Ensure that an MLflow experiment exists. If the experiment does not exist, create it.
     Returns the experiment ID for the specified experiment name.
@@ -137,4 +125,4 @@ def ensure_experiment_exists(experiment_name: str) -> int:
         experiment_id = experiment.experiment_id
         print(f"Experiment already exists with ID: {experiment_id}")
 
-    return experiment_id
+    return str(experiment_id)

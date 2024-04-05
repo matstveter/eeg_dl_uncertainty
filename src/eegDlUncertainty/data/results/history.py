@@ -96,7 +96,7 @@ class History:
         if self.verbose:
             self.print_metrics()
 
-        if not "test" in self._set_name:
+        if "test" not in self._set_name:
             self.epoch_y_true = []
             self.epoch_y_pred = []
             self.epoch_loss = 0

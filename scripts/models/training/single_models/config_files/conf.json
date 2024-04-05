@@ -1,11 +1,12 @@
 {
   "model": {
-    "name": "InceptionNetwork"
+    "name": "InceptionNetwork",
+    "epochs": 500, 
+    "earlystopping": 50
   },
   "hyperparameters": {
     "learning_rate": 0.0001,
     "batch_size": 128,
-    "epochs": 500,
     "augmentations": []
   },
   "result_folder": "/home/tvetern/PhD/dl_uncertainty/results",
@@ -14,6 +15,7 @@
     "overlap": false,
     "version": 1,
     "eeg_epochs": 1,
+    "overlapping_epochs": false,
     "prediction_type": "pairwise",
     "which_one_vs_all_class": "normal",
     "pairwise": ["normal", "dementia"],

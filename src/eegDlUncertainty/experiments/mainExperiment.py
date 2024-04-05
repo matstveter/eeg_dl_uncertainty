@@ -3,6 +3,8 @@ import shutil
 from abc import ABC, abstractmethod
 from datetime import datetime
 import random
+from typing import List, Optional, Union
+
 import numpy
 
 import torch
@@ -24,40 +26,42 @@ class BaseExperiment(ABC):
         print("-----------------------------")
         self.param = kwargs.copy()
         # Get paths
-        self.config_path = kwargs.pop("config_path")
-        self.save_path = kwargs.pop("save_path", "/home/tvetern/PhD/dl_uncertainty/results")
+        self.config_path: str = kwargs.pop("config_path")
+        self.save_path: str = kwargs.pop("save_path", "/home/tvetern/PhD/dl_uncertainty/results")
 
         # Get names
-        self.run_name = kwargs.pop("run_name", None)
-        self.model_name = kwargs.get("classifier_name")
-        self.experiment_name = kwargs.pop("experiment_name", None)
+        self.run_name: Optional[str] = kwargs.pop("run_name", None)
+        self.model_name: str = kwargs.get("classifier_name")
+        self.experiment_name: Optional[str] = kwargs.pop("experiment_name", None)
 
         # Get prediction related parameters
-        self.prediction_type = kwargs.pop("prediction_type")
-        self.pairwise = kwargs.pop("pairwise_class")
-        self.one_class = kwargs.pop("which_one_vs_all")
-        self.dataset_version = kwargs.pop("dataset_version")
-        self.prediction = kwargs.pop("prediction")
+        self.prediction_type: str = kwargs.pop("prediction_type")
+        self.pairwise: List[str] = kwargs.pop("pairwise_class")
+        self.one_class: str = kwargs.pop("which_one_vs_all")
+        self.dataset_version: int = kwargs.pop("dataset_version")
+        self.prediction: str = kwargs.pop("prediction")
 
         # Get eeg related parameters
-        self.num_seconds = kwargs.pop("num_seconds")
-        self.eeg_epochs = kwargs.pop("eeg_epochs")
+        self.num_seconds: int = kwargs.pop("num_seconds")
+        self.eeg_epochs: int = kwargs.pop("eeg_epochs")
+        self.overlapping_epochs: bool = kwargs.pop('epoch_overlap')
 
         # Get augmentation related parameters
-        self.augmentations = kwargs.pop("augmentations")
-        self.augmentation_prob = kwargs.pop("augmentation_prob", 0.2)
+        self.augmentations: List[Union[str, None]] = kwargs.pop("augmentations")
+        self.augmentation_prob: Optional[float] = kwargs.pop("augmentation_prob", 0.2)
 
         # Set training specific data
-        self.train_epochs = kwargs.get("training_epochs")
-        self.batch_size = kwargs.get("batch_size")
-        self.learning_rate = kwargs.get("learning_rate")
+        self.train_epochs: int = kwargs.get("training_epochs")
+        self.batch_size: int = kwargs.get("batch_size")
+        self.learning_rate: float = kwargs.get("learning_rate")
+        self.earlystopping: int = kwargs.get("earlystopping")
 
         self.kwargs = kwargs.copy()
 
         # Set values and prepare for experiments
-        self.random_state = 42
+        self.random_state: int = 42
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.paths = self.setup_experiment_paths()
+        self.paths: str = self.setup_experiment_paths()
         self.prepare_experiment_environment()
 
         # Create values that are being initialized somewhere in the class
@@ -68,6 +72,7 @@ class BaseExperiment(ABC):
         self.test_history = None
         self.best_model_test_history = None
         self.model = None
+        self.temperature_model = None
 
     def setup_experiment_paths(self):
         """
@@ -112,14 +117,14 @@ class BaseExperiment(ABC):
         attribute, affecting random number generation in both Python and NumPy, thereby ensuring that the experiment's
         stochastic elements are reproducible.
 
-        Finally, it calls `get_experiment_name` with parameters that specify the type of prediction, whether the 
-        prediction is pairwise, and if it is a one-class prediction, to dynamically generate and presumably set 
+        Finally, it calls `get_experiment_name` with parameters that specify the type of prediction, whether the
+        prediction is pairwise, and if it is a one-class prediction, to dynamically generate and presumably set
         an experiment name based on these characteristics.
 
         Notes
         -----
         - The method assumes that `mlflow`, `os`, `random`, and `numpy` modules are imported.
-        - The `random_state`, `prediction_type`, `pairwise`, and `one_class` attributes must be set before this method 
+        - The `random_state`, `prediction_type`, `pairwise`, and `one_class` attributes must be set before this method
         is called.
         - It's implied that `get_experiment_name` is a function that sets or uses the experiment name in some capacity,
           though the mechanism for this is not specified within this method.
@@ -130,7 +135,6 @@ class BaseExperiment(ABC):
         numpy.random.seed(self.random_state)
         get_experiment_name(prediction_type=self.prediction_type, pairwise=self.pairwise, one_class=self.one_class,
                             experiment_name=self.experiment_name)
-
 
     def prepare_data(self):
         """
@@ -170,13 +174,14 @@ class BaseExperiment(ABC):
                                      targets=self.prediction,
                                      eeg_len_seconds=self.num_seconds,
                                      epochs=self.eeg_epochs,
+                                     overlapping_epochs=self.overlapping_epochs,
                                      prediction_type=self.prediction_type,
                                      which_one_vs_all=self.one_class,
                                      pairwise=self.pairwise)
         train_subjects, val_subjects, test_subjects = self.dataset.get_splits()
 
         # Set up the training data generator and loader
-        train_gen = CauDataGenerator(subjects=train_subjects, dataset=self.dataset, device=self.device)
+        train_gen = CauDataGenerator(subjects=train_subjects, dataset=self.dataset, device=self.device, split="train")
         if self.augmentations:
             train_augmentations = get_augmentations(aug_names=self.augmentations, probability=self.augmentation_prob,
                                                     random_state=self.random_state)
@@ -188,12 +193,13 @@ class BaseExperiment(ABC):
             train_loader = DataLoader(train_gen, batch_size=self.batch_size, shuffle=True)
 
         # Set up the validation data generator and loader
-        val_gen = CauDataGenerator(subjects=val_subjects, dataset=self.dataset, device=self.device)
+        val_gen = CauDataGenerator(subjects=val_subjects, dataset=self.dataset, device=self.device, split="val")
         val_loader = DataLoader(val_gen, batch_size=self.batch_size, shuffle=True)
 
         # Test data generator and loader
-        test_gen = CauDataGenerator(subjects=test_subjects, dataset=self.dataset, device=self.device)
+        test_gen = CauDataGenerator(subjects=test_subjects, dataset=self.dataset, device=self.device, split="test")
         test_loader = DataLoader(test_gen, batch_size=self.batch_size, shuffle=True)
+
         self.__create_history(len_train=len(train_loader),
                               len_val=len(val_loader),
                               len_test=len(test_loader))
@@ -230,16 +236,19 @@ class BaseExperiment(ABC):
         attributes should exist within the same class as this method, storing dataset information and
         history saving path respectively.
         """
-        self.train_history = History(num_classes=self.dataset.num_classes, set_name="train", loader_lenght=len_train,
-                                     save_path=self.paths)
-        self.val_history = History(num_classes=self.dataset.num_classes, set_name="val",
-                                   loader_lenght=len_val,
-                                   save_path=self.paths)
-        self.test_history = History(num_classes=self.dataset.num_classes, set_name="test", loader_lenght=len_test,
-                                    save_path=self.paths)
-        self.best_model_test_history = History(num_classes=self.dataset.num_classes, set_name="best_test",
-                                               loader_lenght=len_test,
-                                               save_path=self.paths)
+        if self.dataset is not None:
+            self.train_history = History(num_classes=self.dataset.num_classes, set_name="train", loader_lenght=len_train,
+                                         save_path=self.paths)
+            self.val_history = History(num_classes=self.dataset.num_classes, set_name="val",
+                                       loader_lenght=len_val,
+                                       save_path=self.paths)
+            self.test_history = History(num_classes=self.dataset.num_classes, set_name="test", loader_lenght=len_test,
+                                        save_path=self.paths)
+            self.best_model_test_history = History(num_classes=self.dataset.num_classes, set_name="best_test",
+                                                   loader_lenght=len_test,
+                                                   save_path=self.paths)
+        else:
+            raise ValueError("Dataset not provided!")
 
     @abstractmethod
     def create_model(self, **kwargs):
@@ -275,14 +284,18 @@ class BaseExperiment(ABC):
         - The method does not return a value but is expected to update the model's weights and the history objects
           with the results from each epoch of training and validation.
         """
-        self.model.fit_model(train_loader=train_loader, val_loader=val_loader,
-                             training_epochs=self.train_epochs,
-                             device=self.device,
-                             loss_fn=self.criterion,
-                             train_hist=self.train_history,
-                             val_history=self.val_history)
+        if self.model is not None:
+            self.model.fit_model(train_loader=train_loader, val_loader=val_loader,
+                                 training_epochs=self.train_epochs,
+                                 device=self.device,
+                                 loss_fn=self.criterion,
+                                 train_hist=self.train_history,
+                                 val_history=self.val_history,
+                                 earlystopping_patience=self.earlystopping)
+        else:
+            raise ValueError("Model is not initialized and is None!")
 
-    def test_models(self, test_loader):
+    def test_models(self, test_loader, use_temp_scaling=False, val_loader=None):
         """
         Evaluates the current and the best performing models on the test dataset.
 
@@ -318,35 +331,64 @@ class BaseExperiment(ABC):
         This will evaluate both the current and the best performing model on the test dataset, recording their
         performance metrics in their respective history objects.
         """
-        self.model.test_model(test_loader=test_loader, test_hist=self.test_history,
-                              device=self.device, loss_fn=self.criterion)
 
-        # load the best model
-        best_model = MainClassifier(model_name=self.model_name,
-                                    pretrained=self.model.model_path(with_ext=True),
-                                    **self.model.hyperparameters)
-        best_model.test_model(test_loader=test_loader,
-                              test_hist=self.best_model_test_history,
-                              device=self.device,
-                              loss_fn=self.criterion)
+        if (self.model is not None and self.criterion is not None and self.device is not None and self.test_history is
+                not None and self.best_model_test_history is not None):
+            if use_temp_scaling and val_loader is None:
+                raise ValueError("If temperature scaling is set to True, the validation data loader must also be sent to "
+                                 "the test_models function.")
+
+            if use_temp_scaling:
+                self.model.set_temperature(val_loader=val_loader, criterion=self.criterion, device=self.device,
+                                           model_name="Last Model")
+            self.model.test_model(test_loader=test_loader, test_hist=self.test_history,
+                                  device=self.device, loss_fn=self.criterion)
+
+            # load the best model
+            best_model = MainClassifier(model_name=self.model_name,
+                                        pretrained=self.model.model_path(with_ext=True),
+                                        **self.model.hyperparameters)
+            if use_temp_scaling:
+                best_model.set_temperature(val_loader=val_loader, criterion=self.criterion, device=self.device,
+                                           model_name="Best Model")
+
+            best_model.test_model(test_loader=test_loader,
+                                  test_hist=self.best_model_test_history,
+                                  device=self.device,
+                                  loss_fn=self.criterion)
+        else:
+            raise ValueError(f"Missing initialization of values!\n"
+                             f"{self.model=}\n"
+                             f"{self.criterion=}\n"
+                             f"{self.device=}\n"
+                             f"{self.test_history=}\n"
+                             f"{self.best_model_test_history=}\n")
+
+    def temperature_scaling(self, val_loader):
+        if self.model is not None:
+            self.model.set_temperature(val_loader=val_loader, criterion=self.criterion, device=self.device)
+        else:
+            raise ValueError("Model is None!")
 
     def finish_run(self):
         # Save the data
-        self.train_history.save_to_pickle()
-        self.val_history.save_to_pickle()
-        self.test_history.save_to_pickle()
+        if self.train_history is not None and self.val_history is not None and self.test_history is not None and self.best_model_test_history is not None:
+            self.train_history.save_to_pickle()
+            self.val_history.save_to_pickle()
+            self.test_history.save_to_pickle()
 
-        self.train_history.save_to_mlflow()
-        self.val_history.save_to_mlflow()
-        self.test_history.save_to_mlflow()
-        self.best_model_test_history.save_to_mlflow()
+            self.train_history.save_to_mlflow()
+            self.val_history.save_to_mlflow()
+            self.test_history.save_to_mlflow()
+            self.best_model_test_history.save_to_mlflow()
 
-        plot = Plotter(train_dict=self.train_history.get_as_dict(),
-                       val_dict=self.val_history.get_as_dict(),
-                       test_dict=self.test_history.get_as_dict(),
-                       test_dict_best_model=self.best_model_test_history.get_as_dict(), save_path=self.paths)
-        plot.produce_plots()
-
+            plot = Plotter(train_dict=self.train_history.get_as_dict(),
+                           val_dict=self.val_history.get_as_dict(),
+                           test_dict=self.test_history.get_as_dict(),
+                           test_dict_best_model=self.best_model_test_history.get_as_dict(), save_path=self.paths)
+            plot.produce_plots()
+        else:
+            raise ValueError("History object is None, initialize train, val, test and best test history objects!")
     def run(self):
         """
         Executes the machine learning experiment from start to finish.
@@ -399,7 +441,7 @@ class BaseExperiment(ABC):
             self.cleanup_function()
             print(f"Cuda Out Of Memory -> Cleanup -> Error message: {e}")
         else:
-            self.test_models(test_loader=test_loader)
+            self.test_models(test_loader=test_loader, use_temp_scaling=False)
             self.finish_run()
 
         finally:

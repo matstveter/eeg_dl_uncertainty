@@ -5,7 +5,6 @@ import shutil
 import time
 from typing import Any, Dict
 import numpy as np
-import mne
 
 from eegDlUncertainty.data.utils import read_eeg_file, read_json_file
 
@@ -127,18 +126,6 @@ def process_eeg_data(config: Dict[str, Any], conf_path: str) -> None:
     elsewhere and are responsible for processing event information and individual EEG files,
     respectively.
 
-    Examples
-    --------
-    >>> config = {
-    ...     "file_paths": {
-    ...         "eeg_data": "/path/to/eeg/data",
-    ...         "eeg_events": "/path/to/events/file",
-    ...         "output_directory": "/path/to/output"
-    ...     },
-    ...     "preprocessing": {"filter": "bandpass", "freqs": [1, 30]}
-    ... }
-    >>> conf_path = "/path/to/config/file"
-    >>> process_eeg_data(config, conf_path)
     """
     # Check that it is an entry in the config which specifies the path
     if "eeg_data" in config['file_paths']:
@@ -185,7 +172,7 @@ def process_eeg_file(sub_eeg, eeg_path, events, preprocess, nyquist, out_p, star
     Process a single EEG file by applying specified preprocessing steps.
 
     This function reads an EEG file, optionally adjusts the start time based on event information,
-    crops the data to a specified duration, applies bandpass filtering, and optionally downsamples the data.
+    crops the data to a specified duration, applies bandpass filtering, and optionally down-samples the data.
     The processed EEG data is then saved to a specified output path.
 
     Parameters
@@ -202,7 +189,7 @@ def process_eeg_file(sub_eeg, eeg_path, events, preprocess, nyquist, out_p, star
         A dictionary containing preprocessing parameters including the number of seconds to process per subject,
         low and high frequency bounds for bandpass filtering, and whether to downsample the data.
     nyquist : int
-        The Nyquist frequency used as a multiplier to determine the new sampling rate when downsampling.
+        The Nyquist frequency used as a multiplier to determine the new sampling rate when down-sampling.
     out_p : str
         The output directory where the processed EEG data files will be saved.
     start : int
@@ -223,18 +210,11 @@ def process_eeg_file(sub_eeg, eeg_path, events, preprocess, nyquist, out_p, star
       `preprocess['num_seconds_per_subject']`.
     - Applying a bandpass filter with low and high frequency bounds specified by `preprocess['low_freq']` and
       `preprocess['high_freq']`.
-    - Optionally downsampling the data if `preprocess['downsample']` is True, using a new sampling rate determined
+    - Optionally down-sampling the data if `preprocess['downsample']` is True, using a new sampling rate determined
       by `preprocess['high_freq'] * nyquist`.
 
     Examples
     --------
-    >>> preprocess = {
-    ...     "num_seconds_per_subject": 300,
-    ...     "low_freq": 0.1,
-    ...     "high_freq": 40.0,
-    ...     "downsample": True
-    ... }
-    >>> process_eeg_file("subject1.edf", "/data/eeg/", {"subject1": 100}, preprocess, 3, "/output/", 60)
     """
     raw_eeg_data = read_eeg_file(eeg_file_path=os.path.join(eeg_path, str(sub_eeg)))
     if raw_eeg_data is None:

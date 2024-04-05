@@ -49,10 +49,10 @@ def main():
     model.test_model(test_loader=baseline_loader, device=device, loss_fn=criterion, test_hist=test_hist)
 
     for freq in ("delta", "theta", "alpha", "low_beta", "high_beta", "gamma"):
-        print(f"--------------- Testing frequency band: {freq} ---------------")
+        print(f"\n--------------- Testing frequency band: {freq} ---------------")
         
         test_gen = ExplainabilityFrequencyGenerator(subjects=test_subjects, dataset=dataset, frequency_band=freq,
-                                                    device=device)
+                                                    device=device, keep_band=False)
         test_loader = DataLoader(test_gen, batch_size=parameters['batch_size'], shuffle=True)
         test_hist = History(num_classes=dataset.num_classes, set_name="test", loader_lenght=len(test_loader),
                             save_path=None)

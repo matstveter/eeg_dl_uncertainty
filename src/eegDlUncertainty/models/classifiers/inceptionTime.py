@@ -204,7 +204,7 @@ class InceptionNetwork(BaseClassifier):
         # -----------------------------
         super().__init__(in_channels=in_channels, num_classes=num_classes, cnn_units=cnn_units, depth=depth,
                          use_bottleneck=use_bottleneck, activation=activation, max_kernel_size=max_kernel_size,
-                         use_residual=use_residual, name=kwargs.get("classifier_name"))
+                         use_residual=use_residual, classifier_name=kwargs.get("classifier_name"))
 
         # -----------------------------
         # Define Inception modules

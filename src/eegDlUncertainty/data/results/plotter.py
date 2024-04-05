@@ -1,5 +1,4 @@
 import os.path
-import warnings
 
 import matplotlib.pyplot as plt
 import mlflow

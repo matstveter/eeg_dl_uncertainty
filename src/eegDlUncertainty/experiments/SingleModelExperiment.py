@@ -4,14 +4,16 @@ from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
 
 class SingleModelExperiment(BaseExperiment):
     def create_model(self, **kwargs):
-
-        hyperparameters = {"in_channels": self.dataset.num_channels,
-                           "num_classes": self.dataset.num_classes,
-                           "time_steps": self.dataset.eeg_len,
-                           "save_path": self.paths,
-                           "lr": self.learning_rate}
-        kwargs.update(hyperparameters)
-        self.model = MainClassifier(model_name=self.model_name, **kwargs)
+        if self.dataset is not None:
+            hyperparameters = {"in_channels": self.dataset.num_channels,
+                               "num_classes": self.dataset.num_classes,
+                               "time_steps": self.dataset.eeg_len,
+                               "save_path": self.paths,
+                               "lr": self.learning_rate}
+            kwargs.update(hyperparameters)
+            self.model = MainClassifier(model_name=self.model_name, **kwargs)
+        else:
+            raise ValueError("Dataset is not provided!")
 
     @staticmethod
     def add_hyperparameters(change_in_hyperparameters, **kwargs):

@@ -1,7 +1,6 @@
 import argparse
 import os
 
-from eegDlUncertainty.data.results.utils_mlflow import add_config_information
 from eegDlUncertainty.experiments.SingleModelExperiment import SingleModelExperiment
 from eegDlUncertainty.experiments.utils_exp import get_baseparameters_from_config
 
