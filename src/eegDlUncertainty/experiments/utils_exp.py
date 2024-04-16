@@ -1,33 +1,78 @@
 import json
+from typing import List, Optional, Tuple
 
 
 def get_baseparameters_from_config(config_path):
     with open(config_path) as json_file:
         config = json.load(json_file)
+        
+    # Retrieve parameters with type hints
+    prediction: str = config.get('data', {}).get('prediction')
+    dataset_version: str = config.get('data', {}).get('version')
+    eeg_epochs: int = config.get('data', {}).get('eeg_epochs')
+    epoch_overlap: int = config.get('data', {}).get('overlapping_epochs')
+    num_seconds: int = config.get('data', {}).get('num_seconds')
+    prediction_type: str = config.get('data', {}).get('prediction_type')
+    which_one_vs_all: str = config.get('data', {}).get('which_one_vs_all_class')
+    pairwise_class: Tuple[str, ...] = tuple(config.get('data', {}).get('pairwise', ()))
+    classifier_name: str = str(config.get('model', {}).get('name', ''))
+    learning_rate: float = float(config.get('hyperparameters', {}).get('learning_rate'))
+    batch_size: int = config.get('hyperparameters', {}).get('batch_size')
+    augmentations: Optional[List[str]] = config.get('hyperparameters', {}).get('augmentations')
+    training_epochs: int = config.get('model', {}).get('epochs')
+    earlystopping: int = config.get('model', {}).get('earlystopping')
+    mc_dropout_enabled: bool = config.get('mc_dropout', {}).get('enabled', False)
+    mc_dropout_rate: float = config.get('mc_dropout', {}).get('dropout_rate')
+    swa_enabled: bool = config.get('swa', {}).get('enabled', False)
+    swa_start: int = config.get('swa', {}).get('swa_start')
+    swa_lr: float = config.get('swa', {}).get('swa_lr')
+    swa_c_epochs: int = config.get('swa', {}).get('swa_c_epochs')
+    swa_lr_schedule: str = config.get('swa', {}).get('swa_lr_schedule', 'cyclic')
+    swa_c_warmup: int = config.get('swa', {}).get('swa_c_warmup')
+    swag_enabled: bool = config.get('swag', {}).get('enabled', False)
+    swag_start: int = config.get('swag', {}).get('swag_start')
+    swag_lr: float = config.get('swag', {}).get('swag_lr')
+    swag_freq: int = config.get('swag', {}).get('swag_freq')
+    swag_num_samples: int = config.get('swag', {}).get('swag_num_samples')
 
-    kwargs = {
-        'prediction': config['data']['prediction'],
-        'dataset_version': config['data']['version'],
-        'eeg_epochs': config['data']['eeg_epochs'],
-        'epoch_overlap': config['data']['overlapping_epochs'],
-        'num_seconds': config['data']['num_seconds'],
-        'prediction_type': config['data']['prediction_type'],
-        'which_one_vs_all': config['data']['which_one_vs_all_class'],
-        'pairwise_class': config['data']['pairwise'],
-        'classifier_name': config['model']['name'],
-        'learning_rate': config['hyperparameters']['learning_rate'],
-        'batch_size': config['hyperparameters']['batch_size'],
-        'augmentations': config['hyperparameters']['augmentations'],
-        'training_epochs': config['model']['epochs'],
-        'earlystopping': config['model']['earlystopping']
+    # Construct dictionary with parameters
+    param = {
+        'prediction': prediction,
+        'dataset_version': dataset_version,
+        'eeg_epochs': eeg_epochs,
+        'epoch_overlap': epoch_overlap,
+        'num_seconds': num_seconds,
+        'prediction_type': prediction_type,
+        'which_one_vs_all': which_one_vs_all,
+        'pairwise_class': pairwise_class,
+        'classifier_name': classifier_name,
+        'learning_rate': learning_rate,
+        'batch_size': batch_size,
+        'augmentations': augmentations,
+        'training_epochs': training_epochs,
+        'earlystopping': earlystopping,
+        'mc_dropout_enabled': mc_dropout_enabled,
+        'mc_dropout_rate': mc_dropout_rate,
+        'swa_enabled': swa_enabled,
+        'swa_start': swa_start,
+        'swa_lr': swa_lr,
+        'swa_c_epochs': swa_c_epochs,
+        'swa_lr_schedule': swa_lr_schedule,
+        'swa_c_warmup': swa_c_warmup,
+        'swag_enabled': swag_enabled,
+        'swag_start': swag_start,
+        'swag_lr': swag_lr,
+        'swag_freq': swag_freq,
+        'swag_num_samples': swag_num_samples
     }
+
     possible_prediction_types = ("normal", 'pairwise', 'one_vs_all')
     possible_predictions = ('dementia', 'abnormal')
-    if kwargs['prediction_type'] not in possible_prediction_types:
+    if param['prediction_type'] not in possible_prediction_types:
         raise KeyError(f"Prediction type should be one of {possible_prediction_types}, "
-                       f"got '{kwargs['prediction_type']}'")
+                       f"got '{param['prediction_type']}'")
 
-    if kwargs['prediction'] not in possible_predictions:
-        raise KeyError(f"Prediction not in in {possible_predictions}, got '{kwargs['prediction']}'")
+    if param['prediction'] not in possible_predictions:
+        raise KeyError(f"Prediction not in in {possible_predictions}, got '{param['prediction']}'")
 
-    return kwargs
+    return param
