@@ -7,14 +7,17 @@ from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
 
 
 class CauDataGenerator(Dataset):  # type: ignore[type-arg]
-    def __init__(self, subjects: Tuple[str, ...], split: str, dataset: CauEEGDataset,
+    def __init__(self, subjects: Tuple[str, ...], split: str, dataset: CauEEGDataset, use_age: bool,
                  device: Optional[torch.device] = None):
         super().__init__()
+        self._use_age = use_age
+        self.ages = torch.tensor(dataset.load_ages(subjects=subjects), dtype=torch.float32)
         self._x = torch.tensor(dataset.load_eeg_data(subjects=subjects, split=split), dtype=torch.float32)
         targets = torch.tensor(dataset.load_targets(subjects=subjects, split=split), dtype=torch.float32)
 
         if len(targets.shape) == 1:
             targets = targets.unsqueeze(1)
+
         self._y = targets
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device is None else device
 
@@ -33,4 +36,7 @@ class CauDataGenerator(Dataset):  # type: ignore[type-arg]
         return self._x.size()[0]
 
     def __getitem__(self, index):
-        return self._x[index], self._y[index]
+        if self._use_age:
+            return self._x[index], self.ages[index], self._y[index]
+        else:
+            return self._x[index], self._y[index]

@@ -9,13 +9,15 @@ import numpy as np
 import torch.nn.functional
 from tqdm import tqdm
 
+from eegDlUncertainty.data.dataset.misc_classes import AgeScaler
+
 
 class CauEEGDataset:
 
     def __init__(self, *, dataset_version, targets: str, eeg_len_seconds: int, prediction_type: str,
                  which_one_vs_all: str,
-                 pairwise: str, epochs, overlapping_epochs, use_predefined_split: bool = True,
-                 num_channels: int = 19):
+                 pairwise: Tuple[str, str], epochs, overlapping_epochs, use_predefined_split: bool = True,
+                 num_channels: int = 19, age_scaling="Standard"):
         # Read in the dataset config
         config = self._read_config(json_path=os.path.join(os.path.dirname(__file__), "dataset_config.json"))
 
@@ -62,6 +64,7 @@ class CauEEGDataset:
             raise KeyError(f"Specified dataset version: {dataset_version} does not exist, "
                            f"potential datasets are: {os.listdir(config.get('base_dataset_path'))}")
 
+        self._ageScaler = AgeScaler(dataset_dict=self._merged_splits, scaling_type=age_scaling)
         self._epochs = epochs
         self._overlapping_epochs = overlapping_epochs
         self._eeg_len = int(eeg_len_seconds * self.get_eeg_info()['sfreq'])
@@ -438,7 +441,7 @@ class CauEEGDataset:
 
         Examples
         --------
-        >>> self.load_eeg_data(['subject1', 'subject2'], plot=True)
+        >>> self.load_eeg_data(('subject1', 'subject2'), plot=True)
         # This will load the EEG data for 'subject1' and 'subject2', plot the raw data, and return the data array.
         """
 
@@ -500,8 +503,31 @@ class CauEEGDataset:
 
         # Close the progress bare, this could probably be avoided with a with statement instead, but...
         pbar.close()
-        print(data.shape)
         return data
+
+    def load_ages(self, subjects: Tuple[str, ...]):
+        """ Load age of the subjects.
+
+        This function receives a tuple of subject IDs, it loops through these subjects and extracts the age from
+        the loaded dictionary.
+
+        Parameters
+        ----------
+        subjects: Tuple[str, ...]
+            Subject IDs
+
+        Returns
+        -------
+        data: np.ndarray
+            structure = [60, 65, 70, ..., n_subjects], shape=(n_subjects, 1)
+        """
+        transformed_ages = self._ageScaler.transform(sub_ids=subjects)
+
+        if self._epochs == 1:
+            return transformed_ages
+        else:
+            return np.repeat(transformed_ages, self._epochs)
+
 
     @staticmethod
     def __normalize_data(data, method='channel'):
@@ -657,7 +683,7 @@ class CauEEGDataset:
         stats = {}
         for class_name, count in label_counts.items():
             proportion = (count / total_labels) * 100
-            print(f"{split.upper()} - {class_name.upper()}:\n\tCount: {count}\n\tPropo: {proportion:.2f}")
+            # print(f"{split.upper()} - {class_name.upper()}:\n\tCount: {count}\n\tPropo: {proportion:.2f}")
             stats[f"{class_name.upper()}"] = f" count: {count}, %: {proportion}"
 
         mlflow.log_param(f"Class Statistics - {split.upper()}", stats)

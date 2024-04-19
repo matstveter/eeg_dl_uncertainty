@@ -6,26 +6,21 @@ from eegDlUncertainty.experiments.SingleModelExperiment import SingleModelExperi
 from eegDlUncertainty.experiments.utils_exp import get_baseparameters_from_config
 
 
-def generate_random_hyperparameters(model_name):
+def generate_random_hyperparameters():
     random.seed()
-    if model_name == "InceptionNetwork":
-        # Package the parameters into a dictionary
-        params = {
-            'cnn_units': random.choice(range(8, 64, 2)),
-            'depth': random.choice([2, 3, 4, 5, 6, 9, 12, 15, 18, 21, 24, 27, 30]),
-            'max_kernel_size': random.choice(range(20, 120, 2)),
-            'dataset_version': random.choice([1, 2]),
-            'batch_size': random.choice([2, 4, 8, 16, 32, 64, 128, 256]),
-            'mc_dropout_enabled': random.choice([True, False]),
-            'mc_dropout_rate': random.choice([0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]),
-        }
-    else:
-        raise KeyError(f"Unrecognized model name : {model_name}")
-    return params
+    # Define your ranges or sets of possible values for each hyperparameter
+    parameters = {
+        'use_age': random.choice(['True', 'False']),
+        'age_scaling': random.choice(['standard', 'min_max']),
+        'mc_dropout_enabled': [True, False],
+        'mc_dropout_rate': [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
+    }
+
+    return parameters
 
 
 def main():
-    num_random_search_iterations = 500
+    num_random_search_iterations = 250
 
     # Argumentparser
     arg_parser = argparse.ArgumentParser(description="Run script for training a model")
@@ -42,7 +37,7 @@ def main():
     for i in range(num_random_search_iterations):
         parameters = {}
         if args.run_name is None:
-            run_name = f"model_exploit_{i}"
+            run_name = f"dataparam_search_{i}"
         else:
             run_name = f"{args.run_name}_{i}"
 
@@ -50,17 +45,13 @@ def main():
         parameters['config_path'] = config_path
         parameters['run_name'] = run_name
 
-        # parameters['experiment_name'] = f"ModelExploitation_{parameters['classifier_name']}"
+        hyper_param = generate_random_hyperparameters()
+        parameters.update(hyper_param)
 
-        if args.config_path != "test_conf.json":
-            model_param = generate_random_hyperparameters(model_name=parameters['classifier_name'])
-            parameters.update(model_param)
+        # parameters['experiment_name'] = f"HyperParamExp_{parameters['classifier_name']}"
 
         exp = SingleModelExperiment(**parameters)
         exp.run()
-
-        if args.config_path == "test_conf.json":
-            break
 
 
 if __name__ == "__main__":

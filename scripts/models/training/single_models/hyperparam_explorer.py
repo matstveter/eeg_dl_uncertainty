@@ -7,6 +7,7 @@ from eegDlUncertainty.experiments.utils_exp import get_baseparameters_from_confi
 
 
 def generate_random_hyperparameters():
+    random.seed()
     # Define your ranges or sets of possible values for each hyperparameter
     batch_size = [16, 32, 64, 128, 256]  # Example range for cnn_units
     lr = [0.01, 0.001, 0.0001, 0.00001]
@@ -18,12 +19,26 @@ def generate_random_hyperparameters():
     num_sec = random.choice(num_seconds)
     depth = random.choice(depth)
 
+    num_possible_epochs = int(300 / num_sec)
+
+    if num_possible_epochs > 10:
+        num_possible_epochs = 10
+
+    epochs = int(random.choice(range(1, num_possible_epochs)))
+
+    if epochs != 1:
+        epochs_overlap = random.choice(['True', 'False'])
+    else:
+        epochs_overlap = False
+
     # Package the parameters into a dictionary
     parameters = {
         'batch_size': batch_size,
         'learning_rate': lr,
         'num_seconds': num_sec,
-        'depth': depth
+        'depth': depth,
+        'eeg_epochs': epochs,
+        'epoch_overlap': epochs_overlap
     }
 
     return parameters

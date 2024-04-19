@@ -22,8 +22,8 @@ class _InceptionModule(nn.Module):
 
     num_kernel_sizes = 3
 
-    def __init__(self, in_channels: int, units: int = 32, activation: Optional[Callable] = None,
-                 use_bottleneck: bool = True, max_kernel_size: int = 40):
+    def __init__(self, in_channels: int, units: int, use_bottleneck: bool , max_kernel_size: int,
+                 mc_dropout_enabled, mc_dropout_rate, activation: Optional[Callable] = None):
         """
         Initialise
 
@@ -57,8 +57,8 @@ class _InceptionModule(nn.Module):
         # Define convolutional layers with different
         # kernel sizes (to be concatenated at the end)
         # -------------------------------
-        # kernel_sizes = [max_kernel_size // (2 ** i) for i in range(_InceptionModule.num_kernel_sizes)]
-        kernel_sizes = [9, 19, 39]
+        kernel_sizes = [max_kernel_size // (2 ** i) for i in range(_InceptionModule.num_kernel_sizes)]
+        # kernel_sizes = [9, 19, 39]
 
         self._conv_list = nn.ModuleList([nn.Conv1d(in_channels=out_channels, out_channels=units,
                                                    kernel_size=kernel_size, stride=1, padding="same", bias=False)
@@ -71,6 +71,11 @@ class _InceptionModule(nn.Module):
         self._max_pool = nn.MaxPool1d(kernel_size=3, stride=1, padding=1)
         self._conv_after_max_pool = nn.Conv1d(in_channels=in_channels, out_channels=units, kernel_size=1,
                                               padding="same", bias=False)
+        # self._dropout = nn.Dropout(p=mc_dropout_rate)
+        self._mc_dropout_enabled = mc_dropout_enabled
+
+        if self._mc_dropout_enabled:
+            self._dropout_list = nn.ModuleList([nn.Dropout(p=mc_dropout_rate) for _ in range(len(kernel_sizes))])
 
         # Finally, define batch norm
         self._batch_norm = nn.BatchNorm1d(num_features=units * (len(self._conv_list) + 1))  # Must multiply due to
@@ -102,8 +107,14 @@ class _InceptionModule(nn.Module):
 
         # Pass through the conv layers with different kernel sizes
         outputs = []
-        for conv_layer in self._conv_list:
-            outputs.append(self._activation_function(conv_layer(inception_input)))
+        for idx, conv_layer in enumerate(self._conv_list):
+            conv_output = self._activation_function(conv_layer(inception_input))
+
+            if self._mc_dropout_enabled:
+                # conv_output = self._dropout(conv_output)
+                conv_output = self._dropout_list[idx](conv_output)
+
+            outputs.append(conv_output)
 
         # Pass input tensor through max pooling, followed by a conv layer
         max_pool_output = self._max_pool(x)
@@ -198,13 +209,16 @@ class InceptionNetwork(BaseClassifier):
         activation: Optional[Callable] = kwargs.get("activation")
         max_kernel_size: int = kwargs.get("max_kernel_size", 40)
         use_residual: bool = kwargs.get("use_residual", True)
+        mc_dropout_enabled: bool = kwargs.get("mc_dropout_enabled")
+        mc_dropout_rate: float = kwargs.get("mc_dropout_rate")
 
         # -----------------------------
         # Store hyperparameters
         # -----------------------------
         super().__init__(in_channels=in_channels, num_classes=num_classes, cnn_units=cnn_units, depth=depth,
                          use_bottleneck=use_bottleneck, activation=activation, max_kernel_size=max_kernel_size,
-                         use_residual=use_residual, classifier_name=kwargs.get("classifier_name"))
+                         use_residual=use_residual, classifier_name=kwargs.get("classifier_name"),
+                         mc_dropout_enabled=mc_dropout_enabled, mc_dropout_rate=mc_dropout_rate)
 
         # -----------------------------
         # Define Inception modules
@@ -213,7 +227,8 @@ class InceptionNetwork(BaseClassifier):
         self._inception_modules = nn.ModuleList(
             [_InceptionModule(in_channels=in_channel, units=cnn_units,
                               use_bottleneck=use_bottleneck, activation=activation,
-                              max_kernel_size=max_kernel_size)
+                              max_kernel_size=max_kernel_size, mc_dropout_enabled=mc_dropout_enabled,
+                              mc_dropout_rate=mc_dropout_rate)
              for i, in_channel in enumerate([in_channels] + [output_channels]*(depth - 1))]
         )
 
@@ -235,14 +250,16 @@ class InceptionNetwork(BaseClassifier):
         # -----------------------------
         self._fc_layer = nn.Linear(in_features=output_channels,
                                    out_features=num_classes)
+        self._fc_layer_age = nn.Linear(in_features=output_channels + 1, out_features=num_classes)
 
-    def forward(self, input_tensor: torch.Tensor, return_features: bool = False) -> torch.Tensor:
+    def forward(self, input_tensor: torch.Tensor, age=None, return_features: bool = False) -> torch.Tensor:
         """
         Forward method of Inception
         Args:
             input_tensor: A torch.Tensor with shape=(batch, channels, time steps)
             return_features: To return the features after computing Global Average Pooling in the temporal
                 dimension (True) or the predictions (False)
+            age
 
         Returns:
             Predictions, without activation function. No activation function is used, as it is often more numerically
@@ -260,6 +277,7 @@ class InceptionNetwork(BaseClassifier):
             torch.Size([11, 1])
             >>> my_model(torch.rand(size=(11, 533, 400)), return_features=True).size()  # cnn_units * 4
             torch.Size([11, 172])
+
         """
         x = torch.clone(input_tensor)
 
@@ -282,9 +300,21 @@ class InceptionNetwork(BaseClassifier):
         # Return the features if desired
         if return_features:
             return x
+        
+        # Check if age is provided and concatenate
+        if age is not None:
+            # Ensure age is the right shape (B, 1) where B is the batch size
+            if age.dim() == 1:
+                age = age.view(-1, 1)
+            # Concatenate age along the feature dimension
+            x = torch.cat((x, age), dim=1)
 
-        # Pass through FC layer and return. No activation function used
-        return self._fc_layer(x)
+            return self._fc_layer_age(x)
+
+        else:
+
+            # Pass through FC layer and return. No activation function used
+            return self._fc_layer(x)
 
 
 # ------------------

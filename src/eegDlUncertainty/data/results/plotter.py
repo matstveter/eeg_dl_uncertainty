@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 import mlflow
 import seaborn as sns
 
+from eegDlUncertainty.experiments.utils_exp import check_folder
+
 
 class Plotter:
 
@@ -14,19 +16,14 @@ class Plotter:
         self._test_dict_best_model = test_dict_best_model
 
         if save_path is not None:
-            self._save_path = self._check_folder(path=save_path)
+            self._save_path = check_folder(path=save_path, path_ext="figures")
         else:
             self._save_path = save_path
 
-    @staticmethod
-    def _check_folder(path):
-        path_ext = "figures"
-
-        full_path = os.path.join(path, path_ext)
-        if not os.path.exists(full_path):
-            os.makedirs(full_path, exist_ok=True)
-
-        return full_path
+        self.fig_size = (20, 12)
+        self.dpi = 300
+        self.title_font = 20
+        self.tick_font = 16
 
     def produce_plots(self):
         self._plot_loss()
@@ -52,46 +49,74 @@ class Plotter:
         mlflow.log_artifact(filename)
 
     def _plot_loss(self):
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=self.fig_size, dpi=self.dpi)
         plt.plot(self._train_dict['loss'], label='Train Loss')
         plt.plot(self._val_dict['loss'], label='Validation Loss')
-        plt.title('Loss Over Epochs')
-        plt.xlabel('Epoch')
-        plt.ylabel('Loss')
-        plt.legend()
+        plt.title('Loss Over Epochs', fontsize=self.title_font)
+        plt.xlabel('Epoch', fontsize=self.title_font)
+        plt.ylabel('Loss', fontsize=self.title_font)
+        plt.tick_params(axis='both', which='major', labelsize=self.title_font)
+        plt.legend(fontsize=self.title_font)
         self._save_or_show('loss')
 
     def _plot_accuracy(self):
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=self.fig_size, dpi=self.dpi)
         plt.plot(self._train_dict['accuracy'], label='Train Accuracy')
         plt.plot(self._val_dict['accuracy'], label='Validation Accuracy')
-        plt.title('Accuracy Over Epochs')
-        plt.xlabel('Epoch')
-        plt.ylabel('Accuracy')
-        plt.legend()
+        plt.title('Accuracy Over Epochs', fontsize=self.title_font)
+        plt.xlabel('Epoch', fontsize=self.title_font)
+        plt.ylabel('Accuracy', fontsize=self.title_font)
+        plt.tick_params(axis='both', which='major', labelsize=self.title_font)
+        plt.legend(fontsize=self.title_font)
         self._save_or_show('accuracy')
 
     def _plot_auc(self):
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=self.fig_size, dpi=self.dpi)
         sns.lineplot(data=self._train_dict['auc'], label='Train AUC')
         sns.lineplot(data=self._val_dict['auc'], label='Validation AUC')
-        plt.title('AUC Over Epochs')
-        plt.xlabel('Epoch')
-        plt.ylabel('AUC')
-        plt.legend()
+        plt.title('AUC Over Epochs', fontsize=self.title_font)
+        plt.xlabel('Epoch', fontsize=self.title_font)
+        plt.ylabel('AUC', fontsize=self.title_font)
+        plt.tick_params(axis='both', which='major', labelsize=self.title_font)
+        plt.legend(fontsize=self.title_font)
         self._save_or_show('auc')
 
     def _plot_mcc(self):
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=self.fig_size, dpi=self.dpi)
         sns.lineplot(data=self._train_dict['mcc'], label='Train MCC')
         sns.lineplot(data=self._val_dict['mcc'], label='Validation MCC')
-        plt.title('MCC Over Epochs')
-        plt.xlabel('Epoch')
-        plt.ylabel('MCC')
-        plt.legend()
+        plt.title('MCC Over Epochs', fontsize=self.title_font)
+        plt.xlabel('Epoch', fontsize=self.title_font)
+        plt.ylabel('MCC', fontsize=self.title_font)
+        plt.tick_params(axis='both', which='major', labelsize=self.title_font)
+        plt.legend(fontsize=self.title_font)
         self._save_or_show('mcc')
 
     def _save_or_show(self, filename):
+        """
+              Save the currently active matplotlib plot to a PDF file or display it on screen.
+
+              This method decides whether to save the current matplotlib plot based on the presence
+              of a directory path in `_fig_path`. If `_fig_path` is set, the plot is saved as a PDF
+              file in the specified directory with the given filename. If `_fig_path` is None,
+              the plot is displayed using `plt.show()`. After saving or showing the plot, it is closed
+              using `plt.close()` to free up memory.
+
+              Parameters
+              ----------
+              filename : str
+                  The name of the file to save the plot as, without the extension. Used only if `_fig_path`
+                  is not None.
+
+              Attributes
+              ----------
+              _save_path : str or None
+                  The directory path where the plot should be saved. If None, the plot is displayed on screen.
+
+              Returns
+              -------
+              None
+              """
         if self._save_path:
             full_path = f"{self._save_path}/{filename}.pdf"
             plt.savefig(full_path, format="pdf")

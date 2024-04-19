@@ -3,7 +3,7 @@ import shutil
 from abc import ABC, abstractmethod
 from datetime import datetime
 import random
-from typing import List, Optional, Union
+from typing import List, Optional, Tuple, Union
 
 import numpy
 
@@ -15,9 +15,10 @@ from torch.utils.data import DataLoader
 from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
 from eegDlUncertainty.data.data_generators.augmentations import get_augmentations
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
-from eegDlUncertainty.data.results.history import History
+from eegDlUncertainty.data.results.history import History, MCHistory
 from eegDlUncertainty.data.results.plotter import Plotter
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information, get_experiment_name
+from eegDlUncertainty.models.classifiers.age_included_classifier import AgeClassifier
 from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
 
 
@@ -36,10 +37,12 @@ class BaseExperiment(ABC):
 
         # Get prediction related parameters
         self.prediction_type: str = kwargs.pop("prediction_type")
-        self.pairwise: List[str] = kwargs.pop("pairwise_class")
+        self.pairwise: Tuple[str] = kwargs.pop("pairwise_class")
         self.one_class: str = kwargs.pop("which_one_vs_all")
         self.dataset_version: int = kwargs.pop("dataset_version")
         self.prediction: str = kwargs.pop("prediction")
+        self.use_age: bool = kwargs.pop('use_age')
+        self.age_scaling: str = kwargs.pop('age_scaling')
 
         # Get eeg related parameters
         self.num_seconds: int = kwargs.pop("num_seconds")
@@ -56,6 +59,14 @@ class BaseExperiment(ABC):
         self.learning_rate: float = kwargs.get("learning_rate")
         self.earlystopping: int = kwargs.get("earlystopping")
 
+        self.mc_dropout_enabled: bool = kwargs.get("mc_dropout_enabled")
+
+        # SWA specific variables
+        self.swa_enabled: bool = kwargs.pop('swa_enabled')
+        self.swa_start: int = kwargs.pop('swa_start')
+        self.swa_lr: float = kwargs.pop('swa_lr')
+        self.swa_freq: int = kwargs.pop('swa_freq')
+
         self.kwargs = kwargs.copy()
 
         # Set values and prepare for experiments
@@ -71,6 +82,7 @@ class BaseExperiment(ABC):
         self.val_history = None
         self.test_history = None
         self.best_model_test_history = None
+        self.mc_history = None
         self.model = None
         self.temperature_model = None
 
@@ -133,6 +145,7 @@ class BaseExperiment(ABC):
         os.environ["MLFLOW_ENABLE_SYSTEM_METRICS_LOGGING"] = "true"
         random.seed(self.random_state)
         numpy.random.seed(self.random_state)
+        torch.manual_seed(self.random_state)
         get_experiment_name(prediction_type=self.prediction_type, pairwise=self.pairwise, one_class=self.one_class,
                             experiment_name=self.experiment_name)
 
@@ -167,7 +180,7 @@ class BaseExperiment(ABC):
 
         Examples
         --------
-        >>> train_loader, val_loader, test_loader = self.prepare_data()
+        >>> t_loader, v_loader, te_loader = self.prepare_data()
         This will prepare the data loaders and return them for use in training, validation, and testing phases.
         """
         self.dataset = CauEEGDataset(dataset_version=self.dataset_version,
@@ -177,11 +190,13 @@ class BaseExperiment(ABC):
                                      overlapping_epochs=self.overlapping_epochs,
                                      prediction_type=self.prediction_type,
                                      which_one_vs_all=self.one_class,
-                                     pairwise=self.pairwise)
+                                     pairwise=self.pairwise,
+                                     age_scaling=self.age_scaling)
         train_subjects, val_subjects, test_subjects = self.dataset.get_splits()
 
         # Set up the training data generator and loader
-        train_gen = CauDataGenerator(subjects=train_subjects, dataset=self.dataset, device=self.device, split="train")
+        train_gen = CauDataGenerator(subjects=train_subjects, dataset=self.dataset, device=self.device, split="train",
+                                     use_age=self.use_age)
         if self.augmentations:
             train_augmentations = get_augmentations(aug_names=self.augmentations, probability=self.augmentation_prob,
                                                     random_state=self.random_state)
@@ -193,12 +208,14 @@ class BaseExperiment(ABC):
             train_loader = DataLoader(train_gen, batch_size=self.batch_size, shuffle=True)
 
         # Set up the validation data generator and loader
-        val_gen = CauDataGenerator(subjects=val_subjects, dataset=self.dataset, device=self.device, split="val")
+        val_gen = CauDataGenerator(subjects=val_subjects, dataset=self.dataset, device=self.device, split="val",
+                                   use_age=self.use_age)
         val_loader = DataLoader(val_gen, batch_size=self.batch_size, shuffle=True)
 
         # Test data generator and loader
-        test_gen = CauDataGenerator(subjects=test_subjects, dataset=self.dataset, device=self.device, split="test")
-        test_loader = DataLoader(test_gen, batch_size=self.batch_size, shuffle=True)
+        test_gen = CauDataGenerator(subjects=test_subjects, dataset=self.dataset, device=self.device, split="test",
+                                    use_age=self.use_age)
+        test_loader = DataLoader(test_gen, batch_size=self.batch_size, shuffle=False)
 
         self.__create_history(len_train=len(train_loader),
                               len_val=len(val_loader),
@@ -237,7 +254,8 @@ class BaseExperiment(ABC):
         history saving path respectively.
         """
         if self.dataset is not None:
-            self.train_history = History(num_classes=self.dataset.num_classes, set_name="train", loader_lenght=len_train,
+            self.train_history = History(num_classes=self.dataset.num_classes, set_name="train",
+                                         loader_lenght=len_train,
                                          save_path=self.paths)
             self.val_history = History(num_classes=self.dataset.num_classes, set_name="val",
                                        loader_lenght=len_val,
@@ -247,12 +265,20 @@ class BaseExperiment(ABC):
             self.best_model_test_history = History(num_classes=self.dataset.num_classes, set_name="best_test",
                                                    loader_lenght=len_test,
                                                    save_path=self.paths)
+            if self.mc_dropout_enabled:
+                self.mc_history = MCHistory(save_path=self.paths, num_classes=self.dataset.num_classes)
         else:
             raise ValueError("Dataset not provided!")
 
     @abstractmethod
     def create_model(self, **kwargs):
         pass
+
+    def get_model(self, model_name, pretrained=None, **kwargs):
+        if self.use_age:
+            return AgeClassifier(model_name=model_name, pretrained=pretrained, **kwargs)
+        else:
+            return MainClassifier(model_name=model_name, pretrained=pretrained, **kwargs)
 
     def train(self, train_loader, val_loader):
         """
@@ -285,13 +311,34 @@ class BaseExperiment(ABC):
           with the results from each epoch of training and validation.
         """
         if self.model is not None:
-            self.model.fit_model(train_loader=train_loader, val_loader=val_loader,
-                                 training_epochs=self.train_epochs,
-                                 device=self.device,
-                                 loss_fn=self.criterion,
-                                 train_hist=self.train_history,
-                                 val_history=self.val_history,
-                                 earlystopping_patience=self.earlystopping)
+            if self.swa_enabled:
+                self.model.fit_swag(train_loader=train_loader, val_loader=val_loader,
+                                    training_epochs=self.train_epochs,
+                                    device=self.device,
+                                    loss_fn=self.criterion,
+                                    train_hist=self.train_history,
+                                    val_history=self.val_history,
+                                    swa_start=self.swa_start,
+                                    swa_lr=self.swa_lr,
+                                    swa_freq=self.swa_freq)
+                # self.model.fit_swa(train_loader=train_loader, val_loader=val_loader,
+                #                    training_epochs=self.train_epochs,
+                #                    device=self.device,
+                #                    loss_fn=self.criterion,
+                #                    train_hist=self.train_history,
+                #                    val_history=self.val_history,
+                #                    swa_start=self.swa_start,
+                #                    swa_lr=self.swa_lr,
+                #                    swa_freq=self.swa_freq)
+
+            else:
+                self.model.fit_model(train_loader=train_loader, val_loader=val_loader,
+                                     training_epochs=self.train_epochs,
+                                     device=self.device,
+                                     loss_fn=self.criterion,
+                                     train_hist=self.train_history,
+                                     val_history=self.val_history,
+                                     earlystopping_patience=self.earlystopping)
         else:
             raise ValueError("Model is not initialized and is None!")
 
@@ -335,8 +382,9 @@ class BaseExperiment(ABC):
         if (self.model is not None and self.criterion is not None and self.device is not None and self.test_history is
                 not None and self.best_model_test_history is not None):
             if use_temp_scaling and val_loader is None:
-                raise ValueError("If temperature scaling is set to True, the validation data loader must also be sent to "
-                                 "the test_models function.")
+                raise ValueError(
+                    "If temperature scaling is set to True, the validation data loader must also be sent to "
+                    "the test_models function.")
 
             if use_temp_scaling:
                 self.model.set_temperature(val_loader=val_loader, criterion=self.criterion, device=self.device,
@@ -345,7 +393,7 @@ class BaseExperiment(ABC):
                                   device=self.device, loss_fn=self.criterion)
 
             # load the best model
-            best_model = MainClassifier(model_name=self.model_name,
+            best_model = self.get_model(model_name=self.model_name,
                                         pretrained=self.model.model_path(with_ext=True),
                                         **self.model.hyperparameters)
             if use_temp_scaling:
@@ -370,9 +418,16 @@ class BaseExperiment(ABC):
         else:
             raise ValueError("Model is None!")
 
+    def mc_dropout(self, test_loader):
+        if self.mc_history is None:
+            raise ValueError("MC History object not initialized!")
+
+        self.model.get_mc_predictions(test_loader=test_loader, device=self.device, history=self.mc_history)
+
     def finish_run(self):
         # Save the data
-        if self.train_history is not None and self.val_history is not None and self.test_history is not None and self.best_model_test_history is not None:
+        if (self.train_history is not None and self.val_history is not None and
+                self.test_history is not None and self.best_model_test_history is not None):
             self.train_history.save_to_pickle()
             self.val_history.save_to_pickle()
             self.test_history.save_to_pickle()
@@ -389,6 +444,10 @@ class BaseExperiment(ABC):
             plot.produce_plots()
         else:
             raise ValueError("History object is None, initialize train, val, test and best test history objects!")
+
+        if self.mc_history is not None:
+            self.mc_history.save_to_pickle()
+
     def run(self):
         """
         Executes the machine learning experiment from start to finish.
@@ -442,6 +501,10 @@ class BaseExperiment(ABC):
             print(f"Cuda Out Of Memory -> Cleanup -> Error message: {e}")
         else:
             self.test_models(test_loader=test_loader, use_temp_scaling=False)
+
+            if self.mc_dropout_enabled:
+                self.mc_dropout(test_loader=test_loader)
+
             self.finish_run()
 
         finally:
@@ -450,11 +513,6 @@ class BaseExperiment(ABC):
     def cleanup_function(self):
         """
         Attempts to delete the specified folder and its contents.
-
-        Parameters
-        ----------
-        folder_path : str
-            The path to the folder to be deleted.
 
         Notes
         -----

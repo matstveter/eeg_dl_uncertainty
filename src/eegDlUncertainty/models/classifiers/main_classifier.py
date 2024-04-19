@@ -4,13 +4,17 @@ import os.path
 from typing import Optional
 
 import mlflow
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.nn.modules.loss import _Loss
+from torch.optim.swa_utils import AveragedModel, SWALR
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
-from eegDlUncertainty.data.results.history import History
+from eegDlUncertainty.data.results.history import History, MCHistory
 from eegDlUncertainty.models.get_models import get_models
+from eegDlUncertainty.models.model_utils import calculate_metrics, mapping_avg_state_dict
 
 
 class MainClassifier(abc.ABC, nn.Module):
@@ -29,9 +33,9 @@ class MainClassifier(abc.ABC, nn.Module):
             self._hyperparameters = hyperparameters
             self._name = model_name
 
-            save_path: str = kwargs.get("save_path")
+            self.save_path: str = kwargs.get("save_path")
 
-            if save_path is not None:
+            if self.save_path is not None:
                 self._model_path = os.path.join(kwargs.get("save_path"), "model")
             else:
                 raise ValueError("Save path not specified!")
@@ -310,3 +314,135 @@ class MainClassifier(abc.ABC, nn.Module):
 
         optimizer.step(lambda: -evaluation())
         mlflow.log_metric(f"Optimal temperature {model_name}", self.temperature.item())
+
+    def get_mc_predictions(self, *, test_loader: DataLoader, device: torch.device, history: MCHistory, num_forward=50):
+        """
+        Generate Monte Carlo predictions from the model by enabling dropout during test time.
+        This is often used to obtain the predictive uncertainty estimates from models like Bayesian Neural Networks.
+
+        Parameters
+        ----------
+        history: MCHistory
+        test_loader : DataLoader
+            The DataLoader provides batches of test data.
+        device : torch.device
+            The device (e.g., 'cuda' or 'cpu') the model and data should be moved to for computation.
+        num_forward : int, optional
+            The number of forward passes to perform with dropout enabled. Defaults to 50.
+
+        Notes
+        -----
+        This function modifies the model in-place by setting it to evaluation mode and manually turning on
+        the training mode for any dropout layers found in the model. This enables stochastic behaviors, such
+        as dropout during the forward passes, which is crucial for generating multiple predictive outcomes.
+
+        The function collects all predictions and targets from the test loader, performs the specified number
+        of forward passes, and calculates metrics based on these predictions. Each forward pass can potentially
+        lead to different predictions due to the randomness introduced by the dropout layers.
+
+        After predictions, the model is used to compute metrics which are then printed. This function does not
+        return any values directly, but rather outputs through side effects (printing).
+
+        Examples
+        --------
+        >>> model = MyModel()
+        >>> t_loader = DataLoader(my_dataset, batch_size=10)
+        >>> devi = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        >>> model.get_mc_predictions(test_loader=t_loader, device=devi, num_forward=100)
+        """
+        self.to(device)
+        with torch.no_grad():
+            self.eval()
+            # Turn on the training mode for modules that is of instance nn.Dropout
+            for m in self.modules():
+                if isinstance(m, nn.Dropout):
+                    m.train()
+
+            for _ in range(num_forward):
+                predictions = []
+                targets = []
+                for inputs, targets_batch in test_loader:
+                    inputs, target_batch = inputs.to(device), targets_batch.to(device)
+
+                    outputs = self(inputs)
+                    y_pred = self.activation_function(outputs)
+
+                    predictions.extend(y_pred.cpu().numpy())
+                    targets.extend(target_batch.cpu().numpy())
+
+                history.on_pass_end(predictions=predictions, labels=targets)
+
+        history.calculate_metrics()
+
+    def fit_swa(self, *, train_loader: DataLoader, val_loader: DataLoader, training_epochs: int,
+                device: torch.device, loss_fn: _Loss, train_hist: History, val_history: History,
+                swa_start, swa_freq, swa_lr):
+        best_loss = 1_000_000
+
+        optimizer = torch.optim.SGD(self.classifier.parameters(), lr=self._learning_rate)
+
+        # Create an averaged model for SWA
+        swa_model = AveragedModel(self.classifier)
+        swa_model.to(device)
+        self.to(device)
+
+        # Define the learning rate scheduler
+        scheduler = CosineAnnealingLR(optimizer, T_max=100)
+
+        # Set SWA start epoch and create SWA learning rate scheduler
+        swa_scheduler = SWALR(optimizer, swa_lr=swa_lr)
+
+        # Training loop
+        for epoch in range(training_epochs):
+            # Train the model
+            print(f"\n-------------------------  EPOCH {epoch + 1} / {training_epochs}  -------------------------")
+            self.train()
+            for data, targets in train_loader:
+                inputs, targets = data.to(device), targets.to(device)
+
+                optimizer.zero_grad()
+                outputs = self(inputs)
+                loss = loss_fn(outputs, targets)
+
+                y_pred = self.activation_function(logits=outputs)
+                train_hist.batch_stats(y_pred=y_pred, y_true=targets, loss=loss)
+
+                loss.backward()
+                optimizer.step()
+
+            train_hist.on_epoch_end()
+            # Update learning rate scheduler
+            scheduler.step()
+
+            # Update SWA parameters and learning rate scheduler after SWA start epoch
+            if epoch >= swa_start:
+                swa_model.update_parameters(self.classifier)
+                swa_scheduler.step()
+
+            # Evaluate on validation set
+            self.eval()
+            with torch.no_grad():
+                for inputs, targets in val_loader:
+                    inputs, targets = inputs.to(device), targets.to(device)
+                    outputs = self(inputs)
+                    val_loss = loss_fn(outputs, targets)
+
+                    # Activation function and store values
+                    y_pred = self.activation_function(logits=outputs)
+                    val_history.batch_stats(y_pred=y_pred, y_true=targets, loss=val_loss)
+                val_history.on_epoch_end()
+
+            if val_history.get_last_loss() < best_loss:
+                best_loss = val_history.get_last_loss()
+                path = os.path.join(self._model_path, f"{self._name}_model")
+                self.classifier.save(path=path)
+
+        # Update batch normalization statistics for the SWA model
+        torch.optim.swa_utils.update_bn(train_loader, swa_model, device=device)
+
+        self.classifier.load_state_dict(mapping_avg_state_dict(averaged_model_state_dict=swa_model.state_dict()))
+
+        path = os.path.join(self._model_path, f"{self._name}_last_model")
+        self.classifier.save(path=path)
+        self.save_hyperparameters()
+

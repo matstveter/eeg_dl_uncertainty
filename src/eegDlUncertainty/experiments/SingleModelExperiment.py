@@ -1,4 +1,5 @@
 from eegDlUncertainty.experiments.mainExperiment import BaseExperiment
+from eegDlUncertainty.models.classifiers.age_included_classifier import AgeClassifier
 from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
 
 
@@ -11,7 +12,8 @@ class SingleModelExperiment(BaseExperiment):
                                "save_path": self.paths,
                                "lr": self.learning_rate}
             kwargs.update(hyperparameters)
-            self.model = MainClassifier(model_name=self.model_name, **kwargs)
+            self.model = self.get_model(model_name=self.model_name, **kwargs)
+
         else:
             raise ValueError("Dataset is not provided!")
 

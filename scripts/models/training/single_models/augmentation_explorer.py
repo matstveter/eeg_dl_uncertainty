@@ -7,6 +7,7 @@ from eegDlUncertainty.experiments.utils_exp import get_baseparameters_from_confi
 
 
 def generate_random_hyperparameters():
+    random.seed()
     possible_augmentations = ['gaussiannoise', 'timereverse', 'signflip', 'ftsurrogate', 'channelsshuffle',
                               'channelsdropout', 'smoothtimemask', 'bandstopfilter']
 
