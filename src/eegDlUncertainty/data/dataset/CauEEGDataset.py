@@ -465,6 +465,8 @@ class CauEEGDataset:
             # Load the subject numpy file
             npy_data = numpy.load(subject_eeg_data_path)
 
+            npy_data = self.__normalize_data(x=npy_data)
+
             # Plotting function
             if plot:
                 raw = mne.io.RawArray(data=npy_data, info=self.get_eeg_info(), verbose=False)
@@ -528,27 +530,16 @@ class CauEEGDataset:
         else:
             return np.repeat(transformed_ages, self._epochs)
 
-
     @staticmethod
-    def __normalize_data(data, method='channel'):
+    def __normalize_data(x):
         """
         Normalize the data to the range [-1, 1].
         If method is 'channel', normalization is done channel-wise.
         If method is 'subject', normalization is done across all channels for the subject.
         """
-        if method == 'channel':
-            # Channel-wise normalization
-            min_val = np.min(data, axis=1, keepdims=True)
-            max_val = np.max(data, axis=1, keepdims=True)
-        elif method == 'subject':
-            # Subject-wise normalization
-            min_val = np.min(data)
-            max_val = np.max(data)
-        else:
-            raise ValueError("Normalization method must be 'channel' or 'subject'.")
+        x = (x - np.mean(x, axis=-1, keepdims=True)) / (np.std(x, axis=-1, keepdims=True) + 1e-8)
+        return x
 
-        # Normalize to [-1, 1]
-        return 2 * (data - min_val) / (max_val - min_val) - 1
 
     @staticmethod
     def _read_config(json_path: str):

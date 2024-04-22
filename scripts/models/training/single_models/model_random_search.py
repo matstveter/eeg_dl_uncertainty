@@ -17,7 +17,7 @@ def generate_random_hyperparameters(model_name):
             'dataset_version': random.choice([1, 2]),
             'batch_size': random.choice([2, 4, 8, 16, 32, 64, 128, 256]),
             'mc_dropout_enabled': random.choice([True, False]),
-            'mc_dropout_rate': random.choice([0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]),
+            'mc_dropout_rate': random.choice([0.05, 0.1, 0.2, 0.25, 0.3, 0.4, 0.5]),
         }
     else:
         raise KeyError(f"Unrecognized model name : {model_name}")

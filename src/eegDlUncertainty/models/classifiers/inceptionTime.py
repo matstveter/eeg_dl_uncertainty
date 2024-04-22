@@ -236,10 +236,14 @@ class InceptionNetwork(BaseClassifier):
         # Define Shortcut layers
         # -----------------------------
         if use_residual:
-            # A shortcut layer should be used for every third inception module
-            self._shortcut_layers = nn.ModuleList([_ShortcutLayer(in_channels=in_channels,
-                                                                  out_channels=output_channels)
-                                                   for _ in range(len(self._inception_modules) // 3)])
+            # Calculate how many shortcut layers are needed
+            num_shortcut_layers = len(self._inception_modules) // 3
+            self._shortcut_layers = nn.ModuleList()
+            for i in range(num_shortcut_layers):
+                in_channels = in_channels if i == 0 else output_channels
+                self._shortcut_layers.append(
+                    _ShortcutLayer(in_channels=in_channels, out_channels=output_channels)
+                )
         else:
             self._shortcut_layers = None
 
@@ -250,36 +254,29 @@ class InceptionNetwork(BaseClassifier):
         # -----------------------------
         self._fc_layer = nn.Linear(in_features=output_channels,
                                    out_features=num_classes)
+        self._dropout = nn.Dropout(p=0.3)
         self._fc_layer_age = nn.Linear(in_features=output_channels + 1, out_features=num_classes)
 
-    def forward(self, input_tensor: torch.Tensor, age=None, return_features: bool = False) -> torch.Tensor:
+    def forward(self, input_tensor: torch.Tensor) -> torch.Tensor:
         """
         Forward method of Inception
         Args:
             input_tensor: A torch.Tensor with shape=(batch, channels, time steps)
-            return_features: To return the features after computing Global Average Pooling in the temporal
-                dimension (True) or the predictions (False)
-            age
 
         Returns:
             Predictions, without activation function. No activation function is used, as it is often more numerically
             stable to use loss function with logits
-        Examples:
-            >>> my_model = Inception(in_channels=43, num_classes=3)
-            >>> my_model(torch.rand(size=(10, 43, 500))).size()
-            torch.Size([10, 3])
-            >>> my_model(torch.rand(size=(13, 43, 1000))).size()  # The model is compatible with different #time steps
-            torch.Size([13, 3])
-            >>> # Verify that it runs with other arguments specified
-            >>> my_model = Inception(in_channels=533, num_classes=1, cnn_units=43, depth=7, use_residual=False,
-            ...                      use_bottleneck=False, activation=F.elu, max_kernel_size=8)
-            >>> my_model(torch.rand(size=(11, 533, 400))).size()
-            torch.Size([11, 1])
-            >>> my_model(torch.rand(size=(11, 533, 400)), return_features=True).size()  # cnn_units * 4
-            torch.Size([11, 172])
-
         """
-        x = torch.clone(input_tensor)
+        if input_tensor.shape[1] == 20:
+            eeg_data = input_tensor[:, :-1, :]
+            # Only select one of the expanded ages in channel 2...
+            age = input_tensor[:, -1, 0].unsqueeze(1)  #
+        else:
+            eeg_data = input_tensor
+            age = None
+
+        x = torch.clone(eeg_data)
+        input_res = torch.clone(eeg_data)
 
         # Make shortcut layers iterable, if not None
         shortcut_layers = None if self._shortcut_layers is None else iter(self._shortcut_layers)
@@ -288,19 +285,16 @@ class InceptionNetwork(BaseClassifier):
             # Pass though Inception module
             x = inception_module(x)
 
-            # If shortcut layers are included, use them for every third inception module
+            # # If shortcut layers are included, use them for every third inception module
             if shortcut_layers is not None and i % 3 == 2:
                 shortcut_layer = next(shortcut_layers)
-                x = shortcut_layer(input_tensor=input_tensor, output_tensor=x)
+                x = shortcut_layer(input_tensor=input_res, output_tensor=x)
+                input_res = torch.clone(x)
 
         # Global Average Pooling in time dimension. Note that this operation allows a varied numer of time steps to be
         # used
         x = torch.mean(x, dim=-1)  # Averages the temporal dimension and obtains shape=(batch, channel_dimension)
 
-        # Return the features if desired
-        if return_features:
-            return x
-        
         # Check if age is provided and concatenate
         if age is not None:
             # Ensure age is the right shape (B, 1) where B is the batch size
@@ -309,12 +303,14 @@ class InceptionNetwork(BaseClassifier):
             # Concatenate age along the feature dimension
             x = torch.cat((x, age), dim=1)
 
-            return self._fc_layer_age(x)
+            x = self._fc_layer_age(x)
+            return x
 
         else:
 
             # Pass through FC layer and return. No activation function used
-            return self._fc_layer(x)
+            x = self._fc_layer(x)
+            return self._dropout(x)
 
 
 # ------------------

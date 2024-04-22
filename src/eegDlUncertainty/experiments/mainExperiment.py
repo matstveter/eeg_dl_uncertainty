@@ -18,7 +18,6 @@ from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
 from eegDlUncertainty.data.results.history import History, MCHistory
 from eegDlUncertainty.data.results.plotter import Plotter
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information, get_experiment_name
-from eegDlUncertainty.models.classifiers.age_included_classifier import AgeClassifier
 from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
 
 
@@ -275,10 +274,10 @@ class BaseExperiment(ABC):
         pass
 
     def get_model(self, model_name, pretrained=None, **kwargs):
-        if self.use_age:
-            return AgeClassifier(model_name=model_name, pretrained=pretrained, **kwargs)
-        else:
-            return MainClassifier(model_name=model_name, pretrained=pretrained, **kwargs)
+        # if self.use_age:
+        #     return AgeClassifier(model_name=model_name, pretrained=pretrained, **kwargs)
+        # else:
+        return MainClassifier(model_name=model_name, pretrained=pretrained, **kwargs)
 
     def train(self, train_loader, val_loader):
         """

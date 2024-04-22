@@ -1,5 +1,4 @@
 from eegDlUncertainty.experiments.mainExperiment import BaseExperiment
-from eegDlUncertainty.models.classifiers.age_included_classifier import AgeClassifier
 from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
 
 

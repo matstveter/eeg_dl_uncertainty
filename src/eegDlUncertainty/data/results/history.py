@@ -4,6 +4,8 @@ from typing import Any, Dict, List, Optional
 import seaborn as sns
 import mlflow
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import torch
 from sklearn.metrics import (roc_auc_score, f1_score, cohen_kappa_score, precision_score, recall_score,

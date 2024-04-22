@@ -1,36 +1,16 @@
 import argparse
-import itertools
 import os
 import random
+
+import numpy as np
 
 from eegDlUncertainty.experiments.SingleModelExperiment import SingleModelExperiment
 from eegDlUncertainty.experiments.utils_exp import get_baseparameters_from_config
 
 
-def generate_grid_hyperparameters():
-    random.seed()
-    # Define your ranges or sets of possible values for each hyperparameter
-    param_grid = {
-        'use_age': ['True', 'False'],
-        'age_scaling': ['standard', 'min_max'],
-        'mc_dropout_enabled': [True, False],
-        'mc_dropout_rate': [0.1, 0.2, 0.25, 0.3, 0.4, 0.5]
-    }
-
-    # Iterate through the parameter combinations
-    for use_age in ['True', 'False']:
-        for age_scaling in ['standard', 'min_max']:
-            # Yield combinations with MC dropout disabled
-            yield {'use_age': use_age, 'age_scaling': age_scaling, 'mc_dropout_enabled': False}
-
-    # Use itertools.product to generate combinations with MC dropout enabled
-    for combination in itertools.product(*param_grid.values()):
-        params = dict(zip(param_grid.keys(), combination))
-        if params['mc_dropout_enabled']:
-            yield params
-
-
 def main():
+    num_random_search_iterations = 250
+
     # Argumentparser
     arg_parser = argparse.ArgumentParser(description="Run script for training a model")
     arg_parser.add_argument("-c", "--config_path", type=str, help="Path to config (.json) file",
@@ -42,13 +22,15 @@ def main():
         print("WARNING!!!! No config argument added, using the first conf.json file, mostly used for pycharm!")
 
     config_path = os.path.join(os.path.dirname(__file__), "config_files", args.config_path)
+
+    dataset_version = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+    dataset_version = np.repeat(dataset_version, 5)
     parameters = get_baseparameters_from_config(config_path=config_path)
     parameters['config_path'] = config_path
 
-    for i, params in enumerate(generate_grid_hyperparameters()):
-        parameters['run_name'] = f"age_and_mc_{i}"
-        parameters.update(params)
-
+    for d_v in dataset_version:
+        parameters['run_name'] = f"dataset_version_{d_v}"
+        parameters['dataset_version'] = d_v
         exp = SingleModelExperiment(**parameters)
         exp.run()
 

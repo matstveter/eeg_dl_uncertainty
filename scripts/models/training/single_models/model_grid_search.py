@@ -15,8 +15,6 @@ def generate_grid_hyperparameters():
         'depth': [3, 6, 9, 12, 15, 18, 21, 24, 27, 30],
         'max_kernel_size': [20, 40, 80],
         'batch_size': [8, 16, 32, 64, 128, 256]
-        # 'mc_dropout_enabled': [True, False],
-        # 'mc_dropout_rate': [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5],
     }
 
     # Use itertools.product to generate all possible combinations of these parameters

@@ -37,6 +37,9 @@ class CauDataGenerator(Dataset):  # type: ignore[type-arg]
 
     def __getitem__(self, index):
         if self._use_age:
-            return self._x[index], self.ages[index], self._y[index]
+            age_tensor = self.ages[index].clone().detach().view(1, -1)
+            age_tensor = age_tensor.expand(1, self._x[index].shape[1])
+            combined_data = torch.cat((self._x[index], age_tensor), dim=0)
+            return combined_data, self._y[index]
         else:
             return self._x[index], self._y[index]

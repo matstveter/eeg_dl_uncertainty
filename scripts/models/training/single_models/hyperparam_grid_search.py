@@ -1,33 +1,22 @@
 import argparse
 import itertools
 import os
-import random
 
 from eegDlUncertainty.experiments.SingleModelExperiment import SingleModelExperiment
 from eegDlUncertainty.experiments.utils_exp import get_baseparameters_from_config
 
 
 def generate_grid_hyperparameters():
-    random.seed()
-    # Define your ranges or sets of possible values for each hyperparameter
     param_grid = {
-        'use_age': ['True', 'False'],
-        'age_scaling': ['standard', 'min_max'],
-        'mc_dropout_enabled': [True, False],
-        'mc_dropout_rate': [0.1, 0.2, 0.25, 0.3, 0.4, 0.5]
+        'lr': [0.01, 0.001, 0.0001, 0.00001],
+        'num_seconds': [5, 10, 20, 30, 60],
+        'epochs': [1, 2, 4, 8],
+        'depth': [3, 6, 9, 12, 15],
+        'epochs_overlap': [True, False]
     }
-
-    # Iterate through the parameter combinations
-    for use_age in ['True', 'False']:
-        for age_scaling in ['standard', 'min_max']:
-            # Yield combinations with MC dropout disabled
-            yield {'use_age': use_age, 'age_scaling': age_scaling, 'mc_dropout_enabled': False}
-
-    # Use itertools.product to generate combinations with MC dropout enabled
-    for combination in itertools.product(*param_grid.values()):
-        params = dict(zip(param_grid.keys(), combination))
-        if params['mc_dropout_enabled']:
-            yield params
+    keys, values = zip(*param_grid.items())
+    for combination in itertools.product(*values):
+        yield dict(zip(keys, combination))
 
 
 def main():
@@ -46,9 +35,8 @@ def main():
     parameters['config_path'] = config_path
 
     for i, params in enumerate(generate_grid_hyperparameters()):
-        parameters['run_name'] = f"age_and_mc_{i}"
+        parameters['run_name'] = f"hyperparam_grid_{i}"
         parameters.update(params)
-
         exp = SingleModelExperiment(**parameters)
         exp.run()
 
