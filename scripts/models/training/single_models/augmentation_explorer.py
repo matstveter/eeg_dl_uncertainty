@@ -16,7 +16,7 @@ def generate_random_hyperparameters():
 
 
 def main():
-    num_random_search_iterations = 250
+    num_random_search_iterations = 150
 
     # Argumentparser
     arg_parser = argparse.ArgumentParser(description="Run script for training a model")

@@ -11,10 +11,10 @@ from eegDlUncertainty.experiments.utils_exp import get_baseparameters_from_confi
 def generate_grid_hyperparameters():
     # Define the grid of parameters as lists of all possible values
     param_grid = {
-        'cnn_units': [8, 16, 32, 64, 128],
-        'depth': [3, 6, 9, 12, 15, 18, 21, 24, 27, 30],
-        'max_kernel_size': [20, 40, 80],
-        'batch_size': [8, 16, 32, 64, 128, 256]
+        'depth': [3, 6, 9, 12],
+        'fc_bool': [True, False],
+        'fc_act': [True, False],
+        'fc_batch': [True, False]
     }
 
     # Use itertools.product to generate all possible combinations of these parameters
@@ -40,6 +40,7 @@ def main():
     config_parameters['config_path'] = config_path
 
     for i, params in enumerate(generate_grid_hyperparameters()):
+        print(params)
         parameters = copy.deepcopy(config_parameters)
         parameters.update(params)
         parameters['run_name'] = f"model_exhaustive_{i}"

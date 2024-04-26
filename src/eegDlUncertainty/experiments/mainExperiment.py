@@ -273,10 +273,8 @@ class BaseExperiment(ABC):
     def create_model(self, **kwargs):
         pass
 
-    def get_model(self, model_name, pretrained=None, **kwargs):
-        # if self.use_age:
-        #     return AgeClassifier(model_name=model_name, pretrained=pretrained, **kwargs)
-        # else:
+    @staticmethod
+    def get_model(model_name, pretrained=None, **kwargs):
         return MainClassifier(model_name=model_name, pretrained=pretrained, **kwargs)
 
     def train(self, train_loader, val_loader):
@@ -423,6 +421,15 @@ class BaseExperiment(ABC):
 
         self.model.get_mc_predictions(test_loader=test_loader, device=self.device, history=self.mc_history)
 
+    def conformal_prediction(self, val_loader, test_loader, conformal_algorithm, use_temp_scaling=False):
+        coverage = self.model.conformal_prediction(val_loader=val_loader, test_loader=test_loader, device=self.device,
+                                                   use_temp_scaling=use_temp_scaling, criterion=self.criterion,
+                                                   conformal_algorithm=conformal_algorithm)
+        if use_temp_scaling:
+            mlflow.log_param(f"{conformal_algorithm}_coverage_with_temp_scale", coverage)
+        else:
+            mlflow.log_param(f"{conformal_algorithm}_Coverage_without_temp_scale", coverage)
+
     def finish_run(self):
         # Save the data
         if (self.train_history is not None and self.val_history is not None and
@@ -503,6 +510,13 @@ class BaseExperiment(ABC):
 
             if self.mc_dropout_enabled:
                 self.mc_dropout(test_loader=test_loader)
+
+            self.conformal_prediction(val_loader=val_loader, test_loader=test_loader, use_temp_scaling=False,
+                                      conformal_algorithm="equal_weighted")
+            self.conformal_prediction(val_loader=val_loader, test_loader=test_loader, use_temp_scaling=False,
+                                      conformal_algorithm="APS")
+            self.conformal_prediction(val_loader=val_loader, test_loader=test_loader, use_temp_scaling=False,
+                                      conformal_algorithm="RAPS")
 
             self.finish_run()
 

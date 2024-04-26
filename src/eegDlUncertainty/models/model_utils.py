@@ -1,9 +1,6 @@
-import os.path
-
 import numpy as np
 from sklearn.metrics import accuracy_score
 import matplotlib.pyplot as plt
-
 import mlflow
 
 from eegDlUncertainty.experiments.utils_exp import check_folder

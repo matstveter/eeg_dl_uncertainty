@@ -8,11 +8,8 @@ from eegDlUncertainty.experiments.utils_exp import get_baseparameters_from_confi
 
 def generate_grid_hyperparameters():
     param_grid = {
-        'lr': [0.01, 0.001, 0.0001, 0.00001],
         'num_seconds': [5, 10, 20, 30, 60],
-        'epochs': [1, 2, 4, 8],
-        'depth': [3, 6, 9, 12, 15],
-        'epochs_overlap': [True, False]
+        'epochs': [1, 2, 4, 6, 8, 10],
     }
     keys, values = zip(*param_grid.items())
     for combination in itertools.product(*values):
@@ -35,7 +32,7 @@ def main():
     parameters['config_path'] = config_path
 
     for i, params in enumerate(generate_grid_hyperparameters()):
-        parameters['run_name'] = f"hyperparam_grid_{i}"
+        parameters['run_name'] = f"data_info_{i}"
         parameters.update(params)
         exp = SingleModelExperiment(**parameters)
         exp.run()

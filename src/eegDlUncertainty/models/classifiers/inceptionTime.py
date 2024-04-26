@@ -57,8 +57,8 @@ class _InceptionModule(nn.Module):
         # Define convolutional layers with different
         # kernel sizes (to be concatenated at the end)
         # -------------------------------
-        kernel_sizes = [max_kernel_size // (2 ** i) for i in range(_InceptionModule.num_kernel_sizes)]
-        # kernel_sizes = [9, 19, 39]
+        # kernel_sizes = [max_kernel_size // (2 ** i) for i in range(_InceptionModule.num_kernel_sizes)]
+        kernel_sizes = [9, 19, 39]
 
         self._conv_list = nn.ModuleList([nn.Conv1d(in_channels=out_channels, out_channels=units,
                                                    kernel_size=kernel_size, stride=1, padding="same", bias=False)
@@ -212,6 +212,10 @@ class InceptionNetwork(BaseClassifier):
         mc_dropout_enabled: bool = kwargs.get("mc_dropout_enabled")
         mc_dropout_rate: float = kwargs.get("mc_dropout_rate")
 
+        self.use_fc_drop: bool = kwargs.get("fc_bool", False)
+        self.use_act: bool = kwargs.get("fc_act", False)
+        self.use_batch: bool = kwargs.get('fc_batch', False)
+
         # -----------------------------
         # Store hyperparameters
         # -----------------------------
@@ -254,8 +258,14 @@ class InceptionNetwork(BaseClassifier):
         # -----------------------------
         self._fc_layer = nn.Linear(in_features=output_channels,
                                    out_features=num_classes)
+        self._fc_one_layer_age = nn.Linear(in_features=output_channels + 1, out_features=num_classes)
+
+        self._fc_layer_age = nn.Linear(in_features=output_channels + 1, out_features=8)
+
+        self._batch = nn.BatchNorm1d(8)
+        self._fc_layer_last = nn.Linear(in_features=8, out_features=num_classes)
+        self._act = nn.ReLU()
         self._dropout = nn.Dropout(p=0.3)
-        self._fc_layer_age = nn.Linear(in_features=output_channels + 1, out_features=num_classes)
 
     def forward(self, input_tensor: torch.Tensor) -> torch.Tensor:
         """
@@ -303,14 +313,23 @@ class InceptionNetwork(BaseClassifier):
             # Concatenate age along the feature dimension
             x = torch.cat((x, age), dim=1)
 
-            x = self._fc_layer_age(x)
+            if self.use_fc_drop:
+                x = self._fc_layer_age(x)
+                x = self._dropout(x)
+                if self.use_batch:
+                    x = self._batch(x)
+                if self.use_act:
+                    x = self._act(x)
+                x = self._fc_layer_last(x)
+            else:
+                x = self._fc_one_layer_age(x)
             return x
 
         else:
 
             # Pass through FC layer and return. No activation function used
             x = self._fc_layer(x)
-            return self._dropout(x)
+            return x
 
 
 # ------------------
