@@ -1,23 +1,15 @@
 import argparse
-import copy
 import itertools
 import os
-import random
 
 from eegDlUncertainty.experiments.SingleModelExperiment import SingleModelExperiment
 from eegDlUncertainty.experiments.utils_exp import get_baseparameters_from_config
 
 
 def generate_grid_hyperparameters():
-    # Define the grid of parameters as lists of all possible values
     param_grid = {
-        'depth': [3, 6, 9, 12],
-        'fc_bool': [True, False],
-        'fc_act': [True, False],
-        'fc_batch': [True, False]
+        'dataset_version': [1, 2, 3, 4, 5, 6, 7, 8],
     }
-
-    # Use itertools.product to generate all possible combinations of these parameters
     keys, values = zip(*param_grid.items())
     for combination in itertools.product(*values):
         yield dict(zip(keys, combination))
@@ -35,17 +27,13 @@ def main():
         print("WARNING!!!! No config argument added, using the first conf.json file, mostly used for pycharm!")
 
     config_path = os.path.join(os.path.dirname(__file__), "config_files", args.config_path)
-
-    config_parameters = get_baseparameters_from_config(config_path=config_path)
-    config_parameters['config_path'] = config_path
-    config_parameters['experiment_name'] = "model_search"
+    parameters = get_baseparameters_from_config(config_path=config_path)
+    parameters['config_path'] = config_path
+    parameters['experiment_name'] = "dataset_search"
 
     for i, params in enumerate(generate_grid_hyperparameters()):
-        print(params)
-        parameters = copy.deepcopy(config_parameters)
+        parameters['run_name'] = f"dataset_{i}"
         parameters.update(params)
-        parameters['run_name'] = f"model_exhaustive_{i}"
-
         exp = SingleModelExperiment(**parameters)
         exp.run()
 

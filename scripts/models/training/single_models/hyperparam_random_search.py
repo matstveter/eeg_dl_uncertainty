@@ -8,44 +8,28 @@ from eegDlUncertainty.experiments.utils_exp import get_baseparameters_from_confi
 
 def generate_random_hyperparameters():
     random.seed()
-    # Define your ranges or sets of possible values for each hyperparameter
-    batch_size = [16, 32, 64, 128, 256]  # Example range for cnn_units
-    lr = [0.01, 0.001, 0.0001, 0.00001]
-    num_seconds = range(9, 41, 2)
-    depth = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-
-    batch_size = random.choice(batch_size)
-    lr = random.choice(lr)
-    num_sec = random.choice(num_seconds)
-    depth = random.choice(depth)
-
-    num_possible_epochs = int(300 / num_sec)
-
-    if num_possible_epochs > 10:
-        num_possible_epochs = 10
-
-    epochs = int(random.choice(range(1, num_possible_epochs)))
-
-    if epochs != 1:
-        epochs_overlap = random.choice(['True', 'False'])
-    else:
-        epochs_overlap = False
-
     # Package the parameters into a dictionary
     parameters = {
-        'batch_size': batch_size,
-        'learning_rate': lr,
-        'num_seconds': num_sec,
-        'depth': depth,
-        'eeg_epochs': epochs,
-        'epoch_overlap': epochs_overlap
+        'batch_size': random.choice([32, 64, 128]),
+        'learning_rate': random.choice([0.05, 0.01, 0.001, 0.0001]),
+        'num_seconds': random.choice([20, 30, 60]),
+        'depth': random.choice([2, 3, 6, 9, 12]),
+        'eeg_epochs': random.choice([1, 2, 3, 4, 5]),
+        'epoch_overlap': random.choice([True, False]),
+        'mc_dropout_enabled': random.choice([True, False]),
+        'classifier_name': random.choice(['InceptionNetwork', 'InceptionWide']),
+        'age_scaling': random.choice(['standard', 'min_max']),
+        'dataset_version': random.choice([1, 2, 3, 4, 5, 6, 7, 8])
     }
+
+    if parameters['mc_dropout_enabled']:
+        parameters['mc_dropout_rate'] = random.choice([0.2, 0.3, 0.4, 0.5])
 
     return parameters
 
 
 def main():
-    num_random_search_iterations = 250
+    num_random_search_iterations = 500
 
     # Argumentparser
     arg_parser = argparse.ArgumentParser(description="Run script for training a model")
@@ -69,12 +53,10 @@ def main():
         parameters = get_baseparameters_from_config(config_path=config_path)
         parameters['config_path'] = config_path
         parameters['run_name'] = run_name
+        parameters['experiment_name'] = "hyperparameter_search"
 
         hyper_param = generate_random_hyperparameters()
-        print(hyper_param)
         parameters.update(hyper_param)
-
-        # parameters['experiment_name'] = f"HyperParamExp_{parameters['classifier_name']}"
 
         exp = SingleModelExperiment(**parameters)
         exp.run()

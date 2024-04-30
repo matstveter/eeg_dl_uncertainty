@@ -1,5 +1,4 @@
 from eegDlUncertainty.experiments.mainExperiment import BaseExperiment
-from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
 
 
 class SingleModelExperiment(BaseExperiment):

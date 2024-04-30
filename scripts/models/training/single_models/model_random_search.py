@@ -12,12 +12,12 @@ def generate_random_hyperparameters(model_name):
         # Package the parameters into a dictionary
         params = {
             'cnn_units': random.choice(range(8, 64, 2)),
-            'depth': random.choice([2, 3, 4, 5, 6, 9, 12, 15, 18, 21, 24, 27, 30]),
-            'max_kernel_size': random.choice(range(20, 120, 2)),
-            'dataset_version': random.choice([1, 2]),
+            'depth': random.choice([3, 4, 5, 6, 9, 12, 15, 18, 21, 24, 27, 30]),
+            'max_kernel_size': random.choice([20, 40, 60, 80, 120]),
             'batch_size': random.choice([2, 4, 8, 16, 32, 64, 128, 256]),
             'mc_dropout_enabled': random.choice([True, False]),
             'mc_dropout_rate': random.choice([0.05, 0.1, 0.2, 0.25, 0.3, 0.4, 0.5]),
+            'swa_enabled': random.choice([True, False])
         }
     else:
         raise KeyError(f"Unrecognized model name : {model_name}")
@@ -25,7 +25,7 @@ def generate_random_hyperparameters(model_name):
 
 
 def main():
-    num_random_search_iterations = 500
+    num_random_search_iterations = 150
 
     # Argumentparser
     arg_parser = argparse.ArgumentParser(description="Run script for training a model")
@@ -49,6 +49,7 @@ def main():
         parameters = get_baseparameters_from_config(config_path=config_path)
         parameters['config_path'] = config_path
         parameters['run_name'] = run_name
+        parameters['experiment_name'] = "model_search"
 
         # parameters['experiment_name'] = f"ModelExploitation_{parameters['classifier_name']}"
 

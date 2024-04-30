@@ -30,6 +30,7 @@ def main():
     config_path = os.path.join(os.path.dirname(__file__), "config_files", args.config_path)
     parameters = get_baseparameters_from_config(config_path=config_path)
     parameters['config_path'] = config_path
+    parameters['experiment_name'] = "hyperparameter_search"
 
     for i, params in enumerate(generate_grid_hyperparameters()):
         parameters['run_name'] = f"data_info_{i}"

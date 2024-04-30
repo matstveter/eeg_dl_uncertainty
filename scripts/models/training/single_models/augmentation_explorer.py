@@ -41,7 +41,7 @@ def main():
         parameters['config_path'] = config_path
         parameters['run_name'] = run_name
 
-        parameters['experiment_name'] = f"AugmentationExplorer_{parameters['classifier_name']}"
+        parameters['experiment_name'] = f"augmentation_explorer"
 
         augmentation_param = generate_random_hyperparameters()
         parameters['augmentations'] = augmentation_param

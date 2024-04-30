@@ -9,13 +9,10 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.nn.modules.loss import _Loss
-from torch.optim.swa_utils import AveragedModel, SWALR
-from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from eegDlUncertainty.data.results.conformal import AdaptivePredictionSets, ConformalPredictionEqualWeighted
 from eegDlUncertainty.data.results.history import History, MCHistory
 from eegDlUncertainty.models.get_models import get_models
-from eegDlUncertainty.models.model_utils import calculate_metrics, mapping_avg_state_dict
 
 
 class MainClassifier(abc.ABC, nn.Module):
@@ -300,8 +297,9 @@ class MainClassifier(abc.ABC, nn.Module):
         """
         self.eval()
         self.to(device)
+        self.temperature.to(device)
 
-        optimizer = torch.optim.LBFGS([self.temperature], lr=0.01, max_iter=500)
+        optimizer = torch.optim.LBFGS([self.temperature], lr=0.01, max_iter=10000, line_search_fn='strong_wolfe')
 
         def evaluation():
             loss = 0
@@ -379,14 +377,15 @@ class MainClassifier(abc.ABC, nn.Module):
     def conformal_prediction(self, *, val_loader, test_loader, criterion, device, use_temp_scaling, alpha=0.1,
                              conformal_algorithm="RAPS"):
 
-        if use_temp_scaling:
+        # If temperature is 1.0, it means that it has not yet been optimzed....
+        if use_temp_scaling and self.temperature.item() == 1.0:
             self.set_temperature(val_loader=val_loader, criterion=criterion, device=device,
                                  model_name="conformal")
 
         if conformal_algorithm == "equal_weighted":
             self.conformal_classifier = ConformalPredictionEqualWeighted(alpha=alpha)
         elif conformal_algorithm == "RAPS":
-            self.conformal_classifier = AdaptivePredictionSets(alpha=alpha, lam_reg=0.01)
+            self.conformal_classifier = AdaptivePredictionSets(alpha=alpha, lam_reg=0.1)
         elif conformal_algorithm == "APS":
             self.conformal_classifier = AdaptivePredictionSets(alpha=alpha, lam_reg=0)
 
@@ -407,75 +406,3 @@ class MainClassifier(abc.ABC, nn.Module):
                 preds.extend(outputs.cpu().numpy())
                 ground_truth.extend(label.cpu().numpy())
         return np.array(preds), np.array(ground_truth)
-
-    def fit_swa(self, *, train_loader: DataLoader, val_loader: DataLoader, training_epochs: int,
-                device: torch.device, loss_fn: _Loss, train_hist: History, val_history: History,
-                swa_start, swa_freq, swa_lr):
-        best_loss = 1_000_000
-
-        optimizer = torch.optim.SGD(self.classifier.parameters(), lr=self._learning_rate)
-
-        # Create an averaged model for SWA
-        swa_model = AveragedModel(self.classifier)
-        swa_model.to(device)
-        self.to(device)
-
-        # Define the learning rate scheduler
-        scheduler = CosineAnnealingLR(optimizer, T_max=100)
-
-        # Set SWA start epoch and create SWA learning rate scheduler
-        swa_scheduler = SWALR(optimizer, swa_lr=swa_lr)
-
-        # Training loop
-        for epoch in range(training_epochs):
-            # Train the model
-            print(f"\n-------------------------  EPOCH {epoch + 1} / {training_epochs}  -------------------------")
-            self.train()
-            for data, targets in train_loader:
-                inputs, targets = data.to(device), targets.to(device)
-
-                optimizer.zero_grad()
-                outputs = self(inputs)
-                loss = loss_fn(outputs, targets)
-
-                y_pred = self.activation_function(logits=outputs)
-                train_hist.batch_stats(y_pred=y_pred.cpu().numpy(), y_true=targets, loss=loss)
-
-                loss.backward()
-                optimizer.step()
-
-            train_hist.on_epoch_end()
-            # Update learning rate scheduler
-            scheduler.step()
-
-            # Update SWA parameters and learning rate scheduler after SWA start epoch
-            if epoch >= swa_start:
-                swa_model.update_parameters(self.classifier)
-                swa_scheduler.step()
-
-            # Evaluate on validation set
-            self.eval()
-            with torch.no_grad():
-                for inputs, targets in val_loader:
-                    inputs, targets = inputs.to(device), targets.to(device)
-                    outputs = self(inputs)
-                    val_loss = loss_fn(outputs, targets)
-
-                    # Activation function and store values
-                    y_pred = self.activation_function(logits=outputs)
-                    val_history.batch_stats(y_pred=y_pred, y_true=targets, loss=val_loss)
-                val_history.on_epoch_end()
-
-            if val_history.get_last_loss() < best_loss:
-                best_loss = val_history.get_last_loss()
-                path = os.path.join(self._model_path, f"{self._name}_model")
-                self.classifier.save(path=path)
-
-        # Update batch normalization statistics for the SWA model
-        torch.optim.swa_utils.update_bn(train_loader, swa_model, device=device)
-
-        self.classifier.load_state_dict(mapping_avg_state_dict(averaged_model_state_dict=swa_model.state_dict()))
-
-        path = os.path.join(self._model_path, f"{self._name}_last_model")
-        self.classifier.save(path=path)
-        self.save_hyperparameters()

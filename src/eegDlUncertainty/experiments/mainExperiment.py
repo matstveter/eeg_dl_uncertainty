@@ -19,6 +19,7 @@ from eegDlUncertainty.data.results.history import History, MCHistory
 from eegDlUncertainty.data.results.plotter import Plotter
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information, get_experiment_name
 from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
+from eegDlUncertainty.models.classifiers.swag_classifier import SWAClassifier, SWAGClassifier
 
 
 class BaseExperiment(ABC):
@@ -66,6 +67,8 @@ class BaseExperiment(ABC):
         self.swa_lr: float = kwargs.pop('swa_lr')
         self.swa_freq: int = kwargs.pop('swa_freq')
 
+        self.swag_enabled: bool = kwargs.pop("swag_enabled")
+
         self.kwargs = kwargs.copy()
 
         # Set values and prepare for experiments
@@ -84,6 +87,7 @@ class BaseExperiment(ABC):
         self.mc_history = None
         self.model = None
         self.temperature_model = None
+        self.swa_g_classifier = None
 
     def setup_experiment_paths(self):
         """
@@ -308,34 +312,13 @@ class BaseExperiment(ABC):
           with the results from each epoch of training and validation.
         """
         if self.model is not None:
-            if self.swa_enabled:
-                self.model.fit_swag(train_loader=train_loader, val_loader=val_loader,
-                                    training_epochs=self.train_epochs,
-                                    device=self.device,
-                                    loss_fn=self.criterion,
-                                    train_hist=self.train_history,
-                                    val_history=self.val_history,
-                                    swa_start=self.swa_start,
-                                    swa_lr=self.swa_lr,
-                                    swa_freq=self.swa_freq)
-                # self.model.fit_swa(train_loader=train_loader, val_loader=val_loader,
-                #                    training_epochs=self.train_epochs,
-                #                    device=self.device,
-                #                    loss_fn=self.criterion,
-                #                    train_hist=self.train_history,
-                #                    val_history=self.val_history,
-                #                    swa_start=self.swa_start,
-                #                    swa_lr=self.swa_lr,
-                #                    swa_freq=self.swa_freq)
-
-            else:
-                self.model.fit_model(train_loader=train_loader, val_loader=val_loader,
-                                     training_epochs=self.train_epochs,
-                                     device=self.device,
-                                     loss_fn=self.criterion,
-                                     train_hist=self.train_history,
-                                     val_history=self.val_history,
-                                     earlystopping_patience=self.earlystopping)
+            self.model.fit_model(train_loader=train_loader, val_loader=val_loader,
+                                 training_epochs=self.train_epochs,
+                                 device=self.device,
+                                 loss_fn=self.criterion,
+                                 train_hist=self.train_history,
+                                 val_history=self.val_history,
+                                 earlystopping_patience=self.earlystopping)
         else:
             raise ValueError("Model is not initialized and is None!")
 
@@ -420,6 +403,23 @@ class BaseExperiment(ABC):
             raise ValueError("MC History object not initialized!")
 
         self.model.get_mc_predictions(test_loader=test_loader, device=self.device, history=self.mc_history)
+
+    def swa_g_train(self, train_loader, val_loader):
+
+        if self.swa_enabled:
+            self.swa_g_classifier = SWAClassifier(pretrained_model=self.model, learning_rate=self.learning_rate,
+                                                  save_path=self.paths,
+                                                  model_hyperparameters=self.model.hyperparameters,
+                                                  name=self.model_name)
+            # todo Can probably use the forward method using the self.swa_g_classifier for testing the performance
+            # todo Log performance using history objects...
+        else:
+            # todo Implement swag
+            # todo Use a similar setup as SWA, can perhaps just inherit, changing the fit method only..
+            self.swa_g_classifier = SWAGClassifier()
+
+        self.swa_g_classifier.fit(train_loader=train_loader, val_loader=val_loader, swa_epochs=2,
+                                  device=self.device, loss_fn=self.criterion, swa_lr=self.swa_lr)
 
     def conformal_prediction(self, val_loader, test_loader, conformal_algorithm, use_temp_scaling=False):
         coverage = self.model.conformal_prediction(val_loader=val_loader, test_loader=test_loader, device=self.device,
@@ -506,17 +506,21 @@ class BaseExperiment(ABC):
             self.cleanup_function()
             print(f"Cuda Out Of Memory -> Cleanup -> Error message: {e}")
         else:
-            self.test_models(test_loader=test_loader, use_temp_scaling=False)
+            if self.swag_enabled or self.swag_enabled:
+                self.swa_g_train(train_loader=train_loader, val_loader=val_loader)
 
-            if self.mc_dropout_enabled:
+            self.test_models(test_loader=test_loader, use_temp_scaling=False, val_loader=val_loader)
+
+            if self.mc_dropout_enabled and not self.swag_enabled:
                 self.mc_dropout(test_loader=test_loader)
 
-            self.conformal_prediction(val_loader=val_loader, test_loader=test_loader, use_temp_scaling=False,
-                                      conformal_algorithm="equal_weighted")
-            self.conformal_prediction(val_loader=val_loader, test_loader=test_loader, use_temp_scaling=False,
-                                      conformal_algorithm="APS")
-            self.conformal_prediction(val_loader=val_loader, test_loader=test_loader, use_temp_scaling=False,
-                                      conformal_algorithm="RAPS")
+            if not self.swag_enabled:
+                self.conformal_prediction(val_loader=val_loader, test_loader=test_loader, use_temp_scaling=True,
+                                          conformal_algorithm="APS")
+            # self.conformal_prediction(val_loader=val_loader, test_loader=test_loader, use_temp_scaling=True,
+            #                           conformal_algorithm="RAPS")
+            # self.conformal_prediction(val_loader=val_loader, test_loader=test_loader, use_temp_scaling=True,
+            #                           conformal_algorithm="equal_weighted")
 
             self.finish_run()
 

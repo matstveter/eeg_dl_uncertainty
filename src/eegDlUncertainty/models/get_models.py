@@ -1,9 +1,10 @@
+from eegDlUncertainty.models.classifiers.InceptionWide import InceptionWide
 from eegDlUncertainty.models.classifiers.inceptionTime import InceptionNetwork
 
 
 def get_models(model_name, **kwargs):
 
-    available_models = (InceptionNetwork,)
+    available_models = (InceptionNetwork, InceptionWide)
 
     for a_m in available_models:
         if model_name == a_m.__name__:

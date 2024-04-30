@@ -44,9 +44,6 @@ def get_baseparameters_from_config(config_path):
     swag_freq: int = config.get('swag', {}).get('swag_freq')
     swag_num_samples: int = config.get('swag', {}).get('swag_num_samples')
 
-    if swa_enabled and use_age:
-        raise ValueError("SWA is not yet implemented for age...")
-
     # Construct dictionary with parameters
     param = {
         'prediction': prediction,

@@ -3,10 +3,10 @@
     "low_freq": 2.0,
     "high_freq": 40.0,
     "num_seconds_per_subject": 300,
-    "downsample": false,
-    "nyquist": 3,
+    "downsample": true,
+    "nyquist": 5,
     "artefact_removal": [],
-    "start": 30
+    "start": 10
   },
   "file_paths": {
     "eeg_data": "/home/tvetern/datasets/cau_eeg/caueeg-dataset/signal/edf/",
