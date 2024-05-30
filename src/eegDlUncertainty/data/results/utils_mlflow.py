@@ -1,9 +1,8 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 import mlflow
 
 
-def get_experiment_name(prediction_type: str, pairwise: List[str], one_class: str,
-                        experiment_name: Optional[str] = None) -> None:
+def get_experiment_name(experiment_name: Optional[str] = None) -> None:
     """
     Determines and sets the name of the current machine learning experiment based on the type of prediction,
     and optionally, the specific classes involved in the prediction. It sets the experiment name in mlflow,
@@ -11,15 +10,6 @@ def get_experiment_name(prediction_type: str, pairwise: List[str], one_class: st
 
     Parameters
     ----------
-    prediction_type : str
-        The type of prediction for which the experiment is being run. This can be 'normal',
-        'pairwise', or any other type leading to a 'one_class_vs_all' scenario.
-    pairwise : tuple of str
-        A tuple containing the names of the two classes involved in a pairwise comparison.
-        This parameter is used only when prediction_type is 'pairwise'.
-    one_class : str
-        The name of the single class involved in a one-class versus all comparison. This parameter
-        is used when prediction_type is not 'normal' or 'pairwise'.
     experiment_name : str, optional
         A custom name for the experiment. If provided, this name is used directly without
         deriving the name based on the prediction type or classes involved. Default is None.
@@ -46,12 +36,7 @@ def get_experiment_name(prediction_type: str, pairwise: List[str], one_class: st
 
     """
     if experiment_name is None:
-        if prediction_type == "normal":
-            exp_name = "normal_vs_mci_vs_dementia"
-        elif prediction_type == "pairwise":
-            exp_name = f"{prediction_type}_{pairwise[0]}_vs_{pairwise[1]}"
-        else:
-            exp_name = f"{one_class}_vs_all"
+        exp_name = "Experiment"
     else:
         exp_name = experiment_name
 
@@ -89,17 +74,7 @@ def add_config_information(config: Dict[str, Any], dataset: str) -> None:
     mlflow.log_param("Dataset", dataset)
 
     for key, val in config.items():
-        if key == "prediction_type":
-            if val == "pairwise":
-                mlflow.log_param('pair', config['pairwise_class'])
-            elif val == "one_vs_all":
-                mlflow.log_param(key, val)
-                mlflow.log_param("Focus Class", config["which_one_vs_all"])
-            continue
-        elif key == "which_one_vs_all" or key == "pairwise_class":
-            continue
-        else:
-            mlflow.log_param(key, val)
+        mlflow.log_param(key, val)
 
 
 def ensure_experiment_exists(experiment_name: str) -> str:
