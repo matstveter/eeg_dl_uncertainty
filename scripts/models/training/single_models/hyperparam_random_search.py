@@ -2,7 +2,7 @@ import argparse
 import os
 import random
 
-from eegDlUncertainty.experiments.SingleModelExperiment import SingleModelExperiment
+from eegDlUncertainty.experiments.SingleModelExperiment import MCDExperiment, SingleModelExperiment
 from eegDlUncertainty.experiments.utils_exp import get_baseparameters_from_config
 
 
@@ -16,14 +16,9 @@ def generate_random_hyperparameters():
         'depth': random.choice([2, 3, 6, 9, 12]),
         'eeg_epochs': random.choice([1, 2, 3, 4, 5]),
         'epoch_overlap': random.choice([True, False]),
-        'mc_dropout_enabled': random.choice([True, False]),
         'classifier_name': random.choice(['InceptionNetwork', 'InceptionWide']),
         'age_scaling': random.choice(['standard', 'min_max']),
-        'dataset_version': random.choice([1, 2, 3, 4, 5, 6, 7, 8])
     }
-
-    if parameters['mc_dropout_enabled']:
-        parameters['mc_dropout_rate'] = random.choice([0.2, 0.3, 0.4, 0.5])
 
     return parameters
 
@@ -58,7 +53,8 @@ def main():
         hyper_param = generate_random_hyperparameters()
         parameters.update(hyper_param)
 
-        exp = SingleModelExperiment(**parameters)
+        # exp = SingleModelExperiment(**parameters)
+        exp = MCDExperiment(**parameters)
         exp.run()
 
 

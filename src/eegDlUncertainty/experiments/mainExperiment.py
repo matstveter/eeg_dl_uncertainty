@@ -3,7 +3,7 @@ import shutil
 from abc import ABC, abstractmethod
 from datetime import datetime
 import random
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Union
 
 import numpy
 
@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader
 from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
 from eegDlUncertainty.data.data_generators.augmentations import get_augmentations
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
+from eegDlUncertainty.data.dataset.misc_classes import verify_split_subjects
 from eegDlUncertainty.data.results.history import History, MCHistory
 from eegDlUncertainty.data.results.plotter import Plotter
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information, get_experiment_name
@@ -36,9 +37,6 @@ class BaseExperiment(ABC):
         self.experiment_name: Optional[str] = kwargs.pop("experiment_name", None)
 
         # Get prediction related parameters
-        self.prediction_type: str = kwargs.pop("prediction_type")
-        self.pairwise: Tuple[str] = kwargs.pop("pairwise_class")
-        self.one_class: str = kwargs.pop("which_one_vs_all")
         self.dataset_version: int = kwargs.pop("dataset_version")
         self.prediction: str = kwargs.pop("prediction")
         self.use_age: bool = kwargs.pop('use_age')
@@ -63,11 +61,12 @@ class BaseExperiment(ABC):
 
         # SWA specific variables
         self.swa_enabled: bool = kwargs.pop('swa_enabled')
-        self.swa_start: int = kwargs.pop('swa_start')
         self.swa_lr: float = kwargs.pop('swa_lr')
-        self.swa_freq: int = kwargs.pop('swa_freq')
+        self.swa_epochs: int = kwargs.pop('swa_epochs')
 
         self.swag_enabled: bool = kwargs.pop("swag_enabled")
+        self.swag_lr: float = kwargs.pop("swag_lr")
+        self.swag_freq: int = kwargs.pop("swag_freq")
 
         self.kwargs = kwargs.copy()
 
@@ -87,7 +86,7 @@ class BaseExperiment(ABC):
         self.mc_history = None
         self.model = None
         self.temperature_model = None
-        self.swa_g_classifier = None
+        self.test_subjects = None
 
     def setup_experiment_paths(self):
         """
@@ -149,8 +148,7 @@ class BaseExperiment(ABC):
         random.seed(self.random_state)
         numpy.random.seed(self.random_state)
         torch.manual_seed(self.random_state)
-        get_experiment_name(prediction_type=self.prediction_type, pairwise=self.pairwise, one_class=self.one_class,
-                            experiment_name=self.experiment_name)
+        get_experiment_name(experiment_name=self.experiment_name)
 
     def prepare_data(self):
         """
@@ -191,11 +189,14 @@ class BaseExperiment(ABC):
                                      eeg_len_seconds=self.num_seconds,
                                      epochs=self.eeg_epochs,
                                      overlapping_epochs=self.overlapping_epochs,
-                                     prediction_type=self.prediction_type,
-                                     which_one_vs_all=self.one_class,
-                                     pairwise=self.pairwise,
                                      age_scaling=self.age_scaling)
         train_subjects, val_subjects, test_subjects = self.dataset.get_splits()
+
+        train_subjects = verify_split_subjects(train_subjects, path=self.dataset.dataset_path)
+        val_subjects = verify_split_subjects(val_subjects, path=self.dataset.dataset_path)
+        test_subjects = verify_split_subjects(test_subjects, path=self.dataset.dataset_path)
+
+        self.test_subjects = test_subjects
 
         # Set up the training data generator and loader
         train_gen = CauDataGenerator(subjects=train_subjects, dataset=self.dataset, device=self.device, split="train",
@@ -268,8 +269,6 @@ class BaseExperiment(ABC):
             self.best_model_test_history = History(num_classes=self.dataset.num_classes, set_name="best_test",
                                                    loader_lenght=len_test,
                                                    save_path=self.paths)
-            if self.mc_dropout_enabled:
-                self.mc_history = MCHistory(save_path=self.paths, num_classes=self.dataset.num_classes)
         else:
             raise ValueError("Dataset not provided!")
 
@@ -398,37 +397,19 @@ class BaseExperiment(ABC):
         else:
             raise ValueError("Model is None!")
 
-    def mc_dropout(self, test_loader):
-        if self.mc_history is None:
-            raise ValueError("MC History object not initialized!")
+    def swa_train(self, train_loader, val_loader, history):
 
-        self.model.get_mc_predictions(test_loader=test_loader, device=self.device, history=self.mc_history)
+        swa_classifier = SWAClassifier(pretrained_model=self.model, learning_rate=self.learning_rate,
+                                       save_path=self.paths,
+                                       model_hyperparameters=self.model.hyperparameters,
+                                       name=self.model_name)
+        # todo Can probably use the forward method using the self.swa_g_classifier for testing the performance
+        # todo Log performance using history objects...
+        # todo this model can not be used currently with MCD, perhaps use loading of the weights as a possibility?
 
-    def swa_g_train(self, train_loader, val_loader):
-
-        if self.swa_enabled:
-            self.swa_g_classifier = SWAClassifier(pretrained_model=self.model, learning_rate=self.learning_rate,
-                                                  save_path=self.paths,
-                                                  model_hyperparameters=self.model.hyperparameters,
-                                                  name=self.model_name)
-            # todo Can probably use the forward method using the self.swa_g_classifier for testing the performance
-            # todo Log performance using history objects...
-        else:
-            # todo Implement swag
-            # todo Use a similar setup as SWA, can perhaps just inherit, changing the fit method only..
-            self.swa_g_classifier = SWAGClassifier()
-
-        self.swa_g_classifier.fit(train_loader=train_loader, val_loader=val_loader, swa_epochs=2,
-                                  device=self.device, loss_fn=self.criterion, swa_lr=self.swa_lr)
-
-    def conformal_prediction(self, val_loader, test_loader, conformal_algorithm, use_temp_scaling=False):
-        coverage = self.model.conformal_prediction(val_loader=val_loader, test_loader=test_loader, device=self.device,
-                                                   use_temp_scaling=use_temp_scaling, criterion=self.criterion,
-                                                   conformal_algorithm=conformal_algorithm)
-        if use_temp_scaling:
-            mlflow.log_param(f"{conformal_algorithm}_coverage_with_temp_scale", coverage)
-        else:
-            mlflow.log_param(f"{conformal_algorithm}_Coverage_without_temp_scale", coverage)
+        swa_classifier.fit(train_loader=train_loader, val_loader=val_loader, swa_epochs=self.swa_epochs,
+                           device=self.device, loss_fn=self.criterion, swa_lr=self.swa_lr)
+        return swa_classifier
 
     def finish_run(self):
         # Save the data
@@ -454,78 +435,26 @@ class BaseExperiment(ABC):
         if self.mc_history is not None:
             self.mc_history.save_to_pickle()
 
-    def run(self):
-        """
-        Executes the machine learning experiment from start to finish.
-
-        This method encompasses the full lifecycle of a machine learning experiment, including initializing an
-        MLflow run, preparing data, creating the model, training, handling out-of-memory errors, testing, and
-        finalizing the experiment. It leverages MLflow for experiment tracking, allowing for the recording of
-        parameters, metrics, and artifacts for analysis and reproducibility.
-
-        The process includes:
-        - Starting an MLflow run with a specific name, if provided.
-        - Preparing data loaders for training, validation, and testing datasets.
-        - Creating the model with specified parameters.
-        - Training the model and handling any CUDA out-of-memory errors by logging the exception in MLflow and
-          performing cleanup operations.
-        - If training succeeds without errors, testing the model on a test dataset.
-        - Finalizing the experiment by completing the MLflow run.
-
-        Notes
-        -----
-        - The method assumes that `self.run_name`, `self.prepare_data`, `self.create_model`, `self.train`,
-          `self.test_models`, and `self.finish_run` are properly defined and implemented.
-        - Out-of-memory errors during training are specifically caught and handled. Such errors trigger cleanup
-          operations and logging of the error details to MLflow before the script halts or proceeds.
-        - MLflow is used to track the experiment's details, including starting and ending runs, tagging exceptions,
-          and logging parameters or metrics. This requires MLflow to be correctly set up and configured in the
-          environment.
-        - The method automatically ends the MLflow run in a `finally` block, ensuring that the run is closed
-          properly even if errors occur.
-
-        Examples
-        --------
-        >>> self.run()
-        Initiates the experiment, automatically managing the MLflow run, data preparation, model training/testing,
-        and error handling.
-        """
+    def prepare_run(self):
         if self.run_name is not None:
             mlflow.start_run(run_name=self.run_name)
         else:
             mlflow.start_run()
         add_config_information(config=self.param, dataset="CAUEEG")
-
         train_loader, val_loader, test_loader = self.prepare_data()
-        self.create_model(**self.kwargs)
-        try:
-            self.train(train_loader=train_loader, val_loader=val_loader)
-        except torch.cuda.OutOfMemoryError as e:
-            mlflow.set_tag("Exception", "CUDA Out of Memory Error")
-            mlflow.log_param("Exception Message", str(e))
-            self.cleanup_function()
-            print(f"Cuda Out Of Memory -> Cleanup -> Error message: {e}")
+        self.add_dataset_hyperparameters()
+        return train_loader, val_loader, test_loader
+
+    def add_dataset_hyperparameters(self):
+        if self.dataset is not None:
+            hyperparameters = {"in_channels": self.dataset.num_channels,
+                               "num_classes": self.dataset.num_classes,
+                               "time_steps": self.dataset.eeg_len,
+                               "save_path": self.paths,
+                               "lr": self.learning_rate}
+            self.kwargs.update(hyperparameters)
         else:
-            if self.swag_enabled or self.swag_enabled:
-                self.swa_g_train(train_loader=train_loader, val_loader=val_loader)
-
-            self.test_models(test_loader=test_loader, use_temp_scaling=False, val_loader=val_loader)
-
-            if self.mc_dropout_enabled and not self.swag_enabled:
-                self.mc_dropout(test_loader=test_loader)
-
-            if not self.swag_enabled:
-                self.conformal_prediction(val_loader=val_loader, test_loader=test_loader, use_temp_scaling=True,
-                                          conformal_algorithm="APS")
-            # self.conformal_prediction(val_loader=val_loader, test_loader=test_loader, use_temp_scaling=True,
-            #                           conformal_algorithm="RAPS")
-            # self.conformal_prediction(val_loader=val_loader, test_loader=test_loader, use_temp_scaling=True,
-            #                           conformal_algorithm="equal_weighted")
-
-            self.finish_run()
-
-        finally:
-            mlflow.end_run()
+            raise ValueError("Dataset is not provided!")
 
     def cleanup_function(self):
         """

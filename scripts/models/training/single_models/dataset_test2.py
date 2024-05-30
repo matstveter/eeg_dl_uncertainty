@@ -6,6 +6,16 @@ from eegDlUncertainty.experiments.SingleModelExperiment import MCDExperiment, Si
 from eegDlUncertainty.experiments.utils_exp import get_baseparameters_from_config
 
 
+def generate_grid_hyperparameters():
+    param_grid = {
+        'num_seconds': [5, 10, 15, 20, 30, 40, 50, 60],
+        'eeg_epochs': ['all', 'random', 'spread']
+    }
+    keys, values = zip(*param_grid.items())
+    for combination in itertools.product(*values):
+        yield dict(zip(keys, combination))
+
+
 def main():
     # Argumentparser
     arg_parser = argparse.ArgumentParser(description="Run script for training a model")
@@ -18,16 +28,13 @@ def main():
         print("WARNING!!!! No config argument added, using the first conf.json file, mostly used for pycharm!")
 
     config_path = os.path.join(os.path.dirname(__file__), "config_files", args.config_path)
+    parameters = get_baseparameters_from_config(config_path=config_path)
+    parameters['config_path'] = config_path
+    parameters['experiment_name'] = "dataset_eeg"
 
-    dataset_version = [1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12]
-
-    for d in dataset_version:
-        parameters = {}
-        parameters = get_baseparameters_from_config(config_path=config_path)
-        parameters['config_path'] = config_path
-        parameters['experiment_name'] = "dataset_search"
-        parameters['run_name'] = f"dataset_{d}"
-        parameters['dataset_version'] = d
+    for i, params in enumerate(generate_grid_hyperparameters()):
+        parameters['run_name'] = f"dataset_{i}"
+        parameters.update(params)
         print(parameters)
         exp = MCDExperiment(**parameters)
         exp.run()

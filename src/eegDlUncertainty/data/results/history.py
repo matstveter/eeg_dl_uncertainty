@@ -399,6 +399,18 @@ class MCHistory:
         self.dpi = 300
         self.size_of_font = 20
 
+    @property
+    def ensemble_accuracy(self):
+        return self._ensemble_accuracy
+
+    @property
+    def mean_predictions(self):
+        return self._mean_predictions
+
+    @property
+    def get_prediction_set(self):
+        return np.array(self.mean_predictions), np.array(self._labels)
+
     def on_pass_end(self, predictions, labels):
         """
         Handle the actions to be performed at the end of each prediction pass.
@@ -492,6 +504,8 @@ class MCHistory:
         self.plot_metric_vs_accuracy(metric_data=self._predictive_entropy, metric_name='Predictive Entropy')
         self.plot_metric_vs_accuracy(metric_data=self._mutual_information, metric_name='Mutual Information')
         self.plot_metric_vs_accuracy(metric_data=self._true_class_variance, metric_name='Variance')
+
+        # todo Check the performance of the model vs prediction and labels
 
     def _calculate_mean_predictions(self):
         """
@@ -828,3 +842,6 @@ class MCHistory:
         else:
             plt.show()
         plt.close()
+
+    def save_to_mlflow(self):
+        mlflow.log_metric()

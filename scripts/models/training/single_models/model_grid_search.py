@@ -4,17 +4,17 @@ import itertools
 import os
 import random
 
-from eegDlUncertainty.experiments.SingleModelExperiment import SingleModelExperiment
+from eegDlUncertainty.experiments.SingleModelExperiment import MCDExperiment, SingleModelExperiment
 from eegDlUncertainty.experiments.utils_exp import get_baseparameters_from_config
 
 
 def generate_grid_hyperparameters():
     # Define the grid of parameters as lists of all possible values
     param_grid = {
-        'depth': [3, 6, 9, 12],
+        'depth': [2, 3, 4, 5, 6, 9],
         'fc_bool': [True, False],
         'fc_act': [True, False],
-        'fc_batch': [True, False]
+        'fc_batch': [True, False],
     }
 
     # Use itertools.product to generate all possible combinations of these parameters
@@ -46,7 +46,7 @@ def main():
         parameters.update(params)
         parameters['run_name'] = f"model_exhaustive_{i}"
 
-        exp = SingleModelExperiment(**parameters)
+        exp = MCDExperiment(**parameters)
         exp.run()
 
 

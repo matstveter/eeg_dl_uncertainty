@@ -163,6 +163,7 @@ class SWAG(torch.nn.Module):
             mean = module.__getattr__("%s_mean" % name)
             sq_mean = module.__getattr__("%s_sq_mean" % name)
 
+
             # first moment
             mean = mean * self.n_models.item() / (
                     self.n_models.item() + 1.0

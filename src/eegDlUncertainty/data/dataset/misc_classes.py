@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 
@@ -39,10 +41,20 @@ class AgeScaler:
                 else:
                     scaled_age = (age - self._mean) / self._std
 
-                if add_noise:
+                if add_noise and self._scaling_type == "min_max":
                     # Inject Gaussian noise
                     noise = np.random.normal(0, noise_level * scaled_age)
                     scaled_age += noise
 
             transformed_ages.append(scaled_age)
         return np.array(transformed_ages)
+
+
+def verify_split_subjects(subject_list, path):
+    sub_ids = [file_name.split(".")[0] for file_name in os.listdir(path)]
+
+    verified_subjects = []
+    for s in subject_list:
+        if s in sub_ids:
+            verified_subjects.append(s)
+    return verified_subjects

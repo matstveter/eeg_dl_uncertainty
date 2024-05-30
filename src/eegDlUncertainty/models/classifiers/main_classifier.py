@@ -265,7 +265,7 @@ class MainClassifier(abc.ABC, nn.Module):
 
         return model
 
-    def set_temperature(self, val_loader, criterion, device, model_name):
+    def set_temperature(self, val_loader, criterion, device, model_name=None):
         """
         Calibrates the model's temperature parameter using the provided validation loader.
 
@@ -299,7 +299,7 @@ class MainClassifier(abc.ABC, nn.Module):
         self.to(device)
         self.temperature.to(device)
 
-        optimizer = torch.optim.LBFGS([self.temperature], lr=0.01, max_iter=10000, line_search_fn='strong_wolfe')
+        optimizer = torch.optim.LBFGS([self.temperature], lr=0.001, max_iter=1000)
 
         def evaluation():
             loss = 0
@@ -314,8 +314,10 @@ class MainClassifier(abc.ABC, nn.Module):
 
         optimizer.step(lambda: -evaluation())
         mlflow.log_metric(f"Optimal temperature {model_name}", self.temperature.item())
+        print(f"Optimal temperature {model_name}", self.temperature.item())
 
-    def get_mc_predictions(self, *, test_loader: DataLoader, device: torch.device, history: MCHistory, num_forward=50):
+    def get_mc_predictions(self, *, test_loader: DataLoader, device: torch.device, history: MCHistory = None,
+                           num_forward=50):
         """
         Generate Monte Carlo predictions from the model by enabling dropout during test time.
         This is often used to obtain the predictive uncertainty estimates from models like Bayesian Neural Networks.
@@ -358,8 +360,12 @@ class MainClassifier(abc.ABC, nn.Module):
                 if isinstance(m, nn.Dropout):
                     m.train()
 
+            logits_per_pass = []
+            target_classes = []
+
             for _ in range(num_forward):
                 predictions = []
+                output_logits = []
                 targets = []
                 for inputs, targets_batch in test_loader:
                     inputs, target_batch = inputs.to(device), targets_batch.to(device)
@@ -367,14 +373,23 @@ class MainClassifier(abc.ABC, nn.Module):
                     outputs = self(inputs)
                     y_pred = self.activation_function(outputs)
 
+                    output_logits.extend(outputs.cpu().numpy())
                     predictions.extend(y_pred.cpu().numpy())
                     targets.extend(target_batch.cpu().numpy())
 
-                history.on_pass_end(predictions=predictions, labels=targets)
+                if history is not None:
+                    history.on_pass_end(predictions=predictions, labels=targets)
+                else:
+                    logits_per_pass.append(output_logits)
+                    if len(target_classes) == 0:
+                        target_classes = targets
 
-        history.calculate_metrics()
+        if history is not None:
+            history.calculate_metrics()
+        else:
+            return np.array(logits_per_pass), np.array(target_classes)
 
-    def conformal_prediction(self, *, val_loader, test_loader, criterion, device, use_temp_scaling, alpha=0.1,
+    def conformal_prediction(self, *, val_loader, test_loader, criterion, device, use_temp_scaling, alpha=0.2,
                              conformal_algorithm="RAPS"):
 
         # If temperature is 1.0, it means that it has not yet been optimzed....
@@ -406,3 +421,6 @@ class MainClassifier(abc.ABC, nn.Module):
                 preds.extend(outputs.cpu().numpy())
                 ground_truth.extend(label.cpu().numpy())
         return np.array(preds), np.array(ground_truth)
+
+    def save_model(self, path):
+        self.classifier.save(path=path)

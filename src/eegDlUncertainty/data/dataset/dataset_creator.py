@@ -3,9 +3,13 @@ import multiprocessing
 import os
 import shutil
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Tuple, Union
 import numpy as np
+import mne
 
+from autoreject import AutoReject
+
+from eegDlUncertainty.data.dataset.dataset_creator_autoreject import process_eeg_data_autoreject
 from eegDlUncertainty.data.utils import read_eeg_file, read_json_file
 
 
@@ -33,7 +37,7 @@ def create_output_folder(base_path: str, base_name: str = "caug_numpy") -> str:
     return folder_path
 
 
-def process_events(event_json_path: str, event_key: str) -> Dict[str, int]:
+def process_events(event_json_path: str, event_key: str) -> Tuple[Dict[str, Union[int, Dict[str, int]]], float]:
     """
     Process event JSON files in a given directory and extract the start time of a specified event.
 
@@ -70,25 +74,44 @@ def process_events(event_json_path: str, event_key: str) -> Dict[str, int]:
 
     # Empty dict for saving the events to each of the subject
     subject_event = {}
-
-    # Loop through the subjects
+    durations = []
     for s in subjects:
         sub, _ = os.path.splitext(s)
         # Read json file
         events = read_json_file(json_file_path=os.path.join(event_json_path, s))
 
-        # Loop through the event list
+        subject_event[sub] = 0
+        last_event_time = 0
+
+        temp_dict = {'start_time': 0, 'end_time': 0}
+        # Find the first occurrence of either eyes open or eyes closed, because we do not want the first events
         for event in events:
-            # Extract the start time and the event name
             start_time = event[0]
             event_name = event[1]
 
-            # If the first one is found, break out of the inner for loop
-            if event_name == event_key:
-                subject_event[sub] = int(start_time)
+            # The last one is one specif case...
+            if (event_name.lower() == "eyes open" or event_name.lower() == "eyes closed" or
+                    event_name == "passive eye open"):
+                temp_dict['start_time'] = int(start_time)
                 break
 
-    return subject_event
+        # Find the max lenght of the recording, based on either the occurrence of a photic event or just the last event
+        for event in events:
+            start_time = event[0]
+            event_name = event[1]
+            last_event_time = int(start_time)
+
+            if "photic" in event_name.lower():
+                temp_dict['end_time'] = int(start_time)
+                break
+
+        # If no photic event is found, set to the last event time
+        if temp_dict['end_time'] == 0:
+            temp_dict['end_time'] = last_event_time
+
+        durations.append((temp_dict['end_time'] - temp_dict['start_time']) / 200)
+        subject_event[sub] = temp_dict
+    return subject_event, min(durations)
 
 
 def process_eeg_data(config: Dict[str, Any], conf_path: str) -> None:
@@ -141,7 +164,8 @@ def process_eeg_data(config: Dict[str, Any], conf_path: str) -> None:
 
     # Check if there is an entry called eeg_events in the config file, if it is use the process-events function
     if "eeg_events" in config['file_paths']:
-        events = process_events(event_json_path=config['file_paths']['eeg_events'], event_key='Eyes Closed')
+        events, min_duration = process_events(event_json_path=config['file_paths']['eeg_events'],
+                                              event_key='Eyes Closed')
     else:
         events = None
 
@@ -157,17 +181,17 @@ def process_eeg_data(config: Dict[str, Any], conf_path: str) -> None:
     if config['use_multiprocessing']:
         with multiprocessing.Pool(processes=(multiprocessing.cpu_count() - 3)) as pool:
             pool.starmap(process_eeg_file,
-                         [(sub_eeg, eeg_path, events, preprocess, preprocess['nyquist'], outp_path, preprocess['start'])
+                         [(sub_eeg, eeg_path, events, preprocess, preprocess['nyquist'], outp_path)
                           for sub_eeg in eeg_files])
     else:
         for sub_eeg in eeg_files:
             process_eeg_file(sub_eeg=sub_eeg, eeg_path=eeg_path, events=events, preprocess=preprocess,
-                             nyquist=preprocess['nyquist'], out_p=outp_path, start=preprocess['start'])
+                             nyquist=preprocess['nyquist'], out_p=outp_path)
     print(f"Processing finished, time used: {time.perf_counter() - start}")
     shutil.copy(src=conf_path, dst=outp_path)
 
 
-def process_eeg_file(sub_eeg, eeg_path, events, preprocess, nyquist, out_p, start):
+def process_eeg_file(sub_eeg, eeg_path, events, preprocess, nyquist, out_p):
     """
     Process a single EEG file by applying specified preprocessing steps.
 
@@ -192,9 +216,6 @@ def process_eeg_file(sub_eeg, eeg_path, events, preprocess, nyquist, out_p, star
         The Nyquist frequency used as a multiplier to determine the new sampling rate when down-sampling.
     out_p : str
         The output directory where the processed EEG data files will be saved.
-    start : int
-        The default start time (in seconds) from which to begin processing the EEG data if no event information
-        is provided or applicable for a subject.
 
     Notes
     -----
@@ -222,37 +243,57 @@ def process_eeg_file(sub_eeg, eeg_path, events, preprocess, nyquist, out_p, star
         return
     subject_id, _ = os.path.splitext(sub_eeg)
 
-    # Use information from the event or use from the config file
-    if events is not None:
-        try:
-            start = math.ceil(events[subject_id] / raw_eeg_data.info['sfreq'])
-        except KeyError:
-            print("Subject ID missing event_key, setting the start to start from config!")
-            start = start
-    else:
-        # Starting at a time point
-        start = start
+    start_time = events[subject_id]['start_time'] / raw_eeg_data.info['sfreq']
+    end_time = events[subject_id]['end_time'] / raw_eeg_data.info['sfreq']
 
-    end_time = preprocess['num_seconds_per_subject'] + start
+    # Check if the end_time is higher than the recording somehow...
+    if end_time > raw_eeg_data.times[-1]:
+        end_time = raw_eeg_data.times[-1]
 
-    time_max = raw_eeg_data.times[-1]
-    # Check that the recording is shorter or equal the end time
-    if time_max >= end_time:
-        raw_eeg_data.crop(tmin=start, tmax=end_time, verbose=False, include_tmax=False)
-    # Check if we can start the recording from an earlier position...
-    elif time_max >= preprocess['num_seconds_per_subject']:
-        start = time_max - preprocess['num_seconds_per_subject']
-        # Check if we  start earlier in the recording
-        raw_eeg_data.crop(tmin=start, tmax=time_max, verbose=False, include_tmax=False)
-    else:
-        print(f"Subject {sub_eeg} data is too short, skipping...")
+    total_time = end_time - start_time
+    print(total_time)
+
+    if total_time < preprocess['num_seconds_per_subject']:
+        print(f"Data is too short, skipping")
         return
+
+    raw_eeg_data.crop(tmin=start_time, tmax=end_time, verbose=False, include_tmax=False)
+
+    # # Use information from the event or use from the config file
+    # if events is not None:
+    #     print(subject_id)
+    #     try:
+    #         start = math.ceil(events[subject_id]['start'] / raw_eeg_data.info['sfreq'])
+    #     except KeyError:
+    #         print("Subject ID missing event_key, setting the start to start from config!")
+    #         start = start
+    # else:
+    #     # Starting at a time point
+    #     start = start
+    #
+    # end_time = events[subject_id]['end_time'] + start
+    #
+    # time_max = raw_eeg_data.times[-1]
+    # # Check that the recording is shorter or equal the end time
+    # if time_max >= end_time:
+    #     raw_eeg_data.crop(tmin=start, tmax=end_time, verbose=False, include_tmax=False)
+    # # Check if we can start the recording from an earlier position...
+    # elif time_max >= preprocess['num_seconds_per_subject']:
+    #     start = time_max - preprocess['num_seconds_per_subject']
+    #     # Check if we  start earlier in the recording
+    #     raw_eeg_data.crop(tmin=start, tmax=time_max, verbose=False, include_tmax=False)
+    # else:
+    #     print(f"Subject {sub_eeg} data is too short, skipping...")
+    #     return
 
     # Lowpass and high_pass filter the data
     raw_eeg_data.filter(l_freq=preprocess['low_freq'], h_freq=preprocess['high_freq'], verbose=False)
 
     # If downsample is set to true, use the nyquist argument to specify the new sampling rate
     if preprocess['downsample']:
+        if preprocess['high_freq'] * nyquist > 200:
+            print(f"WARNING: Original sampling frequency is 200, with current config, "
+                  f"sampling is done to {preprocess['high_freq'] * nyquist}")
         new_sampling_rate = preprocess['high_freq'] * nyquist  # Defaults to 3, as 2 is the absolute min
         raw_eeg_data.resample(new_sampling_rate, verbose=False)
 
@@ -380,6 +421,7 @@ def create_eeg_dataset(conf_path: str):
     if isinstance(config, dict):
         # Now it's safe to pass config as it's confirmed to be a Dict
         process_eeg_data(config=config, conf_path=conf_path)
+        # process_eeg_data_autoreject(config=config)
     else:
         # Handle the case where config is not a Dict, maybe raise an error or log a warning
         raise TypeError("Expected config to be a dictionary")

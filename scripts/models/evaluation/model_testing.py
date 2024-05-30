@@ -30,10 +30,7 @@ def main():
     dataset = CauEEGDataset(dataset_version=parameters['dataset_version'],
                             targets=parameters['prediction'],
                             eeg_len_seconds=parameters['num_seconds'],
-                            epochs=parameters['eeg_epochs'],
-                            prediction_type=parameters['prediction_type'],
-                            which_one_vs_all=parameters['which_one_vs_all'],
-                            pairwise=parameters['pairwise_class'])
+                            epochs=parameters['eeg_epochs'])
     if dataset.num_classes == 1:
         criterion = torch.nn.BCEWithLogitsLoss()
     else:

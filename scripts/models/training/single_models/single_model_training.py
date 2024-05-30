@@ -1,7 +1,7 @@
 import argparse
 import os
 
-from eegDlUncertainty.experiments.SingleModelExperiment import SingleModelExperiment
+from eegDlUncertainty.experiments.SingleModelExperiment import MCDExperiment, SWAGExperiment, SingleModelExperiment
 from eegDlUncertainty.experiments.utils_exp import get_baseparameters_from_config
 
 
@@ -21,8 +21,14 @@ def main():
     parameters['config_path'] = config_path
     parameters['run_name'] = args.run_name
 
-    exp = SingleModelExperiment(**parameters)
+    # exp = SingleModelExperiment(**parameters)
+    # exp.run()
+
+    exp = MCDExperiment(**parameters)
     exp.run()
+
+    # exp = SWAGExperiment(**parameters)
+    # exp.run()
 
 
 if __name__ == "__main__":
