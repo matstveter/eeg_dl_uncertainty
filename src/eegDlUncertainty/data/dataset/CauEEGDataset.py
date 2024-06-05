@@ -9,13 +9,13 @@ import numpy as np
 import torch.nn.functional
 from tqdm import tqdm
 
-from eegDlUncertainty.data.dataset.misc_classes import AgeScaler
+from eegDlUncertainty.data.dataset.misc_classes import AgeScaler, verify_split_subjects
 
 
 class CauEEGDataset:
 
     def __init__(self, *, dataset_version, targets: str, eeg_len_seconds: int,
-                 epochs: int, overlapping_epochs: bool, use_predefined_split: bool = True,
+                 epochs: str, overlapping_epochs: bool, use_predefined_split: bool = True,
                  num_channels: int = 19, age_scaling="Standard"):
         # Read in the dataset config
         config = self._read_config(json_path=os.path.join(os.path.dirname(__file__), "dataset_config.json"))
@@ -57,6 +57,9 @@ class CauEEGDataset:
             raise KeyError(f"Specified dataset version: {dataset_version} does not exist, "
                            f"potential datasets are: {os.listdir(config.get('base_dataset_path'))}")
 
+        print(self._preprocessing_steps)
+
+
         self._ageScaler = AgeScaler(dataset_dict=self._merged_splits, scaling_type=age_scaling)
         self._epochs = epochs
         self._overlapping_epochs = overlapping_epochs
@@ -71,6 +74,7 @@ class CauEEGDataset:
             self._epochs = int(maximum_epochs/2)
         
         self._epoch_structure = epochs
+        self._eeg_info = self.get_eeg_info()
 
         if self._overlapping_epochs:
             duration = (self._epochs - 1) * (eeg_len_seconds / 2)
@@ -102,6 +106,10 @@ class CauEEGDataset:
     @property
     def dataset_path(self):
         return self._dataset_path
+
+    @property
+    def eeg_info(self):
+        return self._eeg_info
 
     @staticmethod
     def _merge_splits(train_split: Dict[str, Dict[str, Any]], val_split: Dict[str, Dict[str, Any]],
@@ -303,6 +311,11 @@ class CauEEGDataset:
         train_subjects = tuple(self._train_split)
         val_subjects = tuple(self._val_split)
         test_subjects = tuple(self._test_split)
+
+        # Verifies that all subjects in the various sets actaully are present in the folder, else remove them fro split
+        train_subjects = verify_split_subjects(train_subjects, path=self.dataset_path)
+        val_subjects = verify_split_subjects(val_subjects, path=self.dataset_path)
+        test_subjects = verify_split_subjects(test_subjects, path=self.dataset_path)
 
         return train_subjects, val_subjects, test_subjects
 
@@ -559,9 +572,9 @@ class CauEEGDataset:
         - The sampling frequency (`sfreq`) is calculated from the preprocessing steps, specifically from
           the 'high_freq' and 'nyquist' parameters. Ensure these are correctly set in `_preprocessing_steps`.
         """
-        ch_names = ['Fp1-AVG', 'F3-AVG', 'C3-AVG', 'P3-AVG', 'O1-AVG', 'Fp2-AVG', 'F4-AVG', 'C4-AVG',
-                    'P4-AVG', 'O2-AVG', 'F7-AVG', 'T3-AVG', 'T5-AVG', 'F8-AVG', 'T4-AVG', 'T6-AVG',
-                    'FZ-AVG', 'CZ-AVG', 'PZ-AVG']
+        ch_names = ['Fp1', 'F3', 'C3', 'P3', 'O1', 'Fp2', 'F4', 'C4',
+                    'P4', 'O2', 'F7', 'T3', 'T5', 'F8', 'T4', 'T6',
+                    'Fz', 'Cz', 'Pz']
         if self._preprocessing_steps['downsample']:
             sfreq = self._preprocessing_steps['high_freq'] * self._preprocessing_steps['nyquist']
         else:

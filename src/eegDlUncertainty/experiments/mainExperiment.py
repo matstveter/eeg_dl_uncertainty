@@ -16,10 +16,10 @@ from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenera
 from eegDlUncertainty.data.data_generators.augmentations import get_augmentations
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
 from eegDlUncertainty.data.dataset.misc_classes import verify_split_subjects
-from eegDlUncertainty.data.results.history import History, MCHistory
+from eegDlUncertainty.data.results.history import History, MCHistory, get_history_object
 from eegDlUncertainty.data.results.plotter import Plotter
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information, get_experiment_name
-from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
+from eegDlUncertainty.models.classifiers.main_classifier import MCClassifier, MainClassifier
 from eegDlUncertainty.models.classifiers.swag_classifier import SWAClassifier, SWAGClassifier
 
 
@@ -27,6 +27,9 @@ class BaseExperiment(ABC):
     def __init__(self, **kwargs):
         print("-----------------------------")
         self.param = kwargs.copy()
+
+        self.use_test_set = kwargs.pop("use_test_set")
+
         # Get paths
         self.config_path: str = kwargs.pop("config_path")
         self.save_path: str = kwargs.pop("save_path", "/home/tvetern/PhD/dl_uncertainty/results")
@@ -79,14 +82,19 @@ class BaseExperiment(ABC):
         # Create values that are being initialized somewhere in the class
         self.dataset = None
         self.criterion = None
-        self.train_history = None
-        self.val_history = None
-        self.test_history = None
-        self.best_model_test_history = None
-        self.mc_history = None
         self.model = None
         self.temperature_model = None
         self.test_subjects = None
+
+    def prepare_run(self):
+        if self.run_name is not None:
+            mlflow.start_run(run_name=self.run_name)
+        else:
+            mlflow.start_run()
+        add_config_information(config=self.param, dataset="CAUEEG")
+        train_loader, val_loader, test_loader = self.prepare_data()
+        self.add_dataset_hyperparameters()
+        return train_loader, val_loader, test_loader
 
     def setup_experiment_paths(self):
         """
@@ -118,7 +126,7 @@ class BaseExperiment(ABC):
                     dst=os.path.join(paths, os.path.basename(self.config_path)))
         return paths
 
-    def prepare_experiment_environment(self):
+    def prepare_experiment_environment(self, seed=None):
         """
         Prepares the environment for running a machine learning experiment.
 
@@ -147,7 +155,10 @@ class BaseExperiment(ABC):
         os.environ["MLFLOW_ENABLE_SYSTEM_METRICS_LOGGING"] = "true"
         random.seed(self.random_state)
         numpy.random.seed(self.random_state)
-        torch.manual_seed(self.random_state)
+        if seed is None:
+            torch.manual_seed(self.random_state)
+        else:
+            torch.manual_seed(seed)
         get_experiment_name(experiment_name=self.experiment_name)
 
     def prepare_data(self):
@@ -192,10 +203,6 @@ class BaseExperiment(ABC):
                                      age_scaling=self.age_scaling)
         train_subjects, val_subjects, test_subjects = self.dataset.get_splits()
 
-        train_subjects = verify_split_subjects(train_subjects, path=self.dataset.dataset_path)
-        val_subjects = verify_split_subjects(val_subjects, path=self.dataset.dataset_path)
-        test_subjects = verify_split_subjects(test_subjects, path=self.dataset.dataset_path)
-
         self.test_subjects = test_subjects
 
         # Set up the training data generator and loader
@@ -221,10 +228,6 @@ class BaseExperiment(ABC):
                                     use_age=self.use_age)
         test_loader = DataLoader(test_gen, batch_size=self.batch_size, shuffle=False)
 
-        self.__create_history(len_train=len(train_loader),
-                              len_val=len(val_loader),
-                              len_test=len(test_loader))
-
         if self.dataset.num_classes == 1:
             self.criterion = torch.nn.BCEWithLogitsLoss()
         else:
@@ -232,96 +235,67 @@ class BaseExperiment(ABC):
 
         return train_loader, val_loader, test_loader
 
-    def __create_history(self, len_train: int, len_val: int, len_test: int) -> None:
+    def _get_history(self, train_loader, val_loader, test_loader):
+        train_history = get_history_object(num_classes=self.dataset.num_classes, loader_length=len(train_loader),
+                                           set_name="train", save_path=self.paths)
+        val_history = get_history_object(num_classes=self.dataset.num_classes, loader_length=len(val_loader),
+                                         set_name="val", save_path=self.paths)
+        test_history = get_history_object(num_classes=self.dataset.num_classes, loader_length=len(test_loader),
+                                          set_name="test", save_path=self.paths)
+        return train_history, val_history, test_history
+
+    def add_dataset_hyperparameters(self):
+        if self.dataset is not None:
+            hyperparameters = {"in_channels": self.dataset.num_channels,
+                               "num_classes": self.dataset.num_classes,
+                               "time_steps": self.dataset.eeg_len,
+                               "save_path": self.paths,
+                               "lr": self.learning_rate}
+            self.kwargs.update(hyperparameters)
+        else:
+            raise ValueError("Dataset is not provided!")
+
+    def cleanup_function(self):
         """
-        Initializes history objects for training, validation, test, and best model test datasets.
-
-        This method creates four `History` instances corresponding to the training, validation,
-        test, and best model test datasets. Each `History` instance is initialized with the number of
-        classes in the dataset, a set name identifier, the length of the respective data loader, and
-        a path for saving the history. The `History` instances are stored as attributes of the class.
-
-        Parameters
-        ----------
-        len_train : int
-            Length of the training data loader, indicating how many batches of data it contains.
-        len_val : int
-            Length of the validation data loader, indicating how many batches of data it contains.
-        len_test : int
-            Length of the test data loader, indicating how many batches of data it contains.
+        Attempts to delete the specified folder and its contents.
 
         Notes
         -----
-        The `History` class is assumed to require the number of classes in the dataset, a set name,
-        the loader length, and a save path as its initialization arguments. The `dataset` and `paths`
-        attributes should exist within the same class as this method, storing dataset information and
-        history saving path respectively.
+        - This function uses `shutil.rmtree` to delete the folder and all its contents.
+        - Error handling is implemented to catch and log exceptions, preventing the function from raising exceptions if
+          the folder cannot be deleted (e.g., if the folder does not exist or an error occurs during deletion).
         """
-        if self.dataset is not None:
-            self.train_history = History(num_classes=self.dataset.num_classes, set_name="train",
-                                         loader_lenght=len_train,
-                                         save_path=self.paths)
-            self.val_history = History(num_classes=self.dataset.num_classes, set_name="val",
-                                       loader_lenght=len_val,
-                                       save_path=self.paths)
-            self.test_history = History(num_classes=self.dataset.num_classes, set_name="test", loader_lenght=len_test,
-                                        save_path=self.paths)
-            self.best_model_test_history = History(num_classes=self.dataset.num_classes, set_name="best_test",
-                                                   loader_lenght=len_test,
-                                                   save_path=self.paths)
+        try:
+            shutil.rmtree(self.paths)
+            print(f"Successfully deleted the folder: {self.paths} due to OOMemory")
+        except Exception as e:
+            print(f"Error deleting the folder: {self.paths}. Exception: {e}")
+
+    def temperature_scaling(self, val_loader):
+        if self.model is not None:
+            self.model.set_temperature(val_loader=val_loader, criterion=self.criterion, device=self.device)
         else:
-            raise ValueError("Dataset not provided!")
+            raise ValueError("Model is None!")
+
+    def swa_train(self, train_loader, val_loader, history):
+
+        swa_classifier = SWAClassifier(pretrained_model=self.model, learning_rate=self.learning_rate,
+                                       save_path=self.paths,
+                                       model_hyperparameters=self.model.hyperparameters,
+                                       name=self.model_name)
+        swa_classifier.fit(train_loader=train_loader, val_loader=val_loader, swa_epochs=self.swa_epochs,
+                           device=self.device, loss_fn=self.criterion, swa_lr=self.swa_lr)
+        return swa_classifier
 
     @abstractmethod
     def create_model(self, **kwargs):
         pass
 
-    @staticmethod
-    def get_model(model_name, pretrained=None, **kwargs):
-        return MainClassifier(model_name=model_name, pretrained=pretrained, **kwargs)
+    @abstractmethod
+    def train(self, train_loader, val_loader, train_history, val_history):
+        pass
 
-    def train(self, train_loader, val_loader):
-        """
-        Trains the model using the provided training and validation data loaders.
-
-        This method starts the training process of the model by calling its `fit_model` method with the
-        training and validation data loaders, the number of training epochs, the computing device, the loss function,
-        and history objects for both training and validation. It effectively encapsulates the training loop,
-        directing data through the model and making adjustments based on the computed loss and the specified
-        optimization strategy.
-
-        Parameters
-        ----------
-        train_loader : DataLoader
-            The DataLoader for the training dataset, providing batches of data.
-        val_loader : DataLoader
-            The DataLoader for the validation dataset, used for evaluating the model's performance
-            on unseen data during training.
-
-        Notes
-        -----
-        - The model is expected to have a `fit_model` method with parameters for the training and validation
-          data loaders, number of epochs, device, loss function, and history objects for training and validation.
-        - This method assumes that `self.train_epochs`, `self.device`, `self.criterion`, `self.train_history`, and
-          `self.val_history` are already properly initialized in the class.
-        - The actual training logic, including the forward pass, loss computation, backpropagation, and parameter
-          updates, is handled within the `fit_model` method of the model. This method primarily serves to organize
-          these operations and pass the necessary configurations.
-        - The method does not return a value but is expected to update the model's weights and the history objects
-          with the results from each epoch of training and validation.
-        """
-        if self.model is not None:
-            self.model.fit_model(train_loader=train_loader, val_loader=val_loader,
-                                 training_epochs=self.train_epochs,
-                                 device=self.device,
-                                 loss_fn=self.criterion,
-                                 train_hist=self.train_history,
-                                 val_history=self.val_history,
-                                 earlystopping_patience=self.earlystopping)
-        else:
-            raise ValueError("Model is not initialized and is None!")
-
-    def test_models(self, test_loader, use_temp_scaling=False, val_loader=None):
+    def test_models(self, test_loader, val_loader, use_temp_scaling=False):
         """
         Evaluates the current and the best performing models on the test dataset.
 
@@ -358,116 +332,46 @@ class BaseExperiment(ABC):
         performance metrics in their respective history objects.
         """
 
-        if (self.model is not None and self.criterion is not None and self.device is not None and self.test_history is
-                not None and self.best_model_test_history is not None):
-            if use_temp_scaling and val_loader is None:
-                raise ValueError(
-                    "If temperature scaling is set to True, the validation data loader must also be sent to "
-                    "the test_models function.")
+        if self.use_test_set:
+            if (
+                    self.model is not None and self.criterion is not None and self.device is not None and self.test_history is
+                    not None and self.best_model_test_history is not None):
+                if use_temp_scaling and val_loader is None:
+                    raise ValueError(
+                        "If temperature scaling is set to True, the validation data loader must also be sent to "
+                        "the test_models function.")
 
-            if use_temp_scaling:
-                self.model.set_temperature(val_loader=val_loader, criterion=self.criterion, device=self.device,
-                                           model_name="Last Model")
-            self.model.test_model(test_loader=test_loader, test_hist=self.test_history,
-                                  device=self.device, loss_fn=self.criterion)
+                if use_temp_scaling:
+                    self.model.set_temperature(val_loader=val_loader, criterion=self.criterion, device=self.device,
+                                               model_name="Last Model")
+                self.model.test_model(test_loader=test_loader, test_hist=self.test_history,
+                                      device=self.device, loss_fn=self.criterion)
 
-            # load the best model
+                # load the best model
+                best_model = self.get_model(model_name=self.model_name, mc_model=self.mc_dropout_enabled,
+                                            pretrained=self.model.model_path(with_ext=True),
+                                            **self.model.hyperparameters)
+                if use_temp_scaling:
+                    best_model.set_temperature(val_loader=val_loader, criterion=self.criterion, device=self.device,
+                                               model_name="Best Model")
+
+                best_model.test_model(test_loader=test_loader,
+                                      test_hist=self.best_model_test_history,
+                                      device=self.device,
+                                      loss_fn=self.criterion)
+            else:
+                raise ValueError(f"Missing initialization of values!\n"
+                                 f"{self.model=}\n"
+                                 f"{self.criterion=}\n"
+                                 f"{self.device=}\n"
+                                 f"{self.test_history=}\n"
+                                 f"{self.best_model_test_history=}\n")
+        else:
+            print("Testing with the best model on the validation set!")
             best_model = self.get_model(model_name=self.model_name,
                                         pretrained=self.model.model_path(with_ext=True),
                                         **self.model.hyperparameters)
-            if use_temp_scaling:
-                best_model.set_temperature(val_loader=val_loader, criterion=self.criterion, device=self.device,
-                                           model_name="Best Model")
-
-            best_model.test_model(test_loader=test_loader,
+            best_model.test_model(test_loader=val_loader,
                                   test_hist=self.best_model_test_history,
                                   device=self.device,
                                   loss_fn=self.criterion)
-        else:
-            raise ValueError(f"Missing initialization of values!\n"
-                             f"{self.model=}\n"
-                             f"{self.criterion=}\n"
-                             f"{self.device=}\n"
-                             f"{self.test_history=}\n"
-                             f"{self.best_model_test_history=}\n")
-
-    def temperature_scaling(self, val_loader):
-        if self.model is not None:
-            self.model.set_temperature(val_loader=val_loader, criterion=self.criterion, device=self.device)
-        else:
-            raise ValueError("Model is None!")
-
-    def swa_train(self, train_loader, val_loader, history):
-
-        swa_classifier = SWAClassifier(pretrained_model=self.model, learning_rate=self.learning_rate,
-                                       save_path=self.paths,
-                                       model_hyperparameters=self.model.hyperparameters,
-                                       name=self.model_name)
-        # todo Can probably use the forward method using the self.swa_g_classifier for testing the performance
-        # todo Log performance using history objects...
-        # todo this model can not be used currently with MCD, perhaps use loading of the weights as a possibility?
-
-        swa_classifier.fit(train_loader=train_loader, val_loader=val_loader, swa_epochs=self.swa_epochs,
-                           device=self.device, loss_fn=self.criterion, swa_lr=self.swa_lr)
-        return swa_classifier
-
-    def finish_run(self):
-        # Save the data
-        if (self.train_history is not None and self.val_history is not None and
-                self.test_history is not None and self.best_model_test_history is not None):
-            self.train_history.save_to_pickle()
-            self.val_history.save_to_pickle()
-            self.test_history.save_to_pickle()
-
-            self.train_history.save_to_mlflow()
-            self.val_history.save_to_mlflow()
-            self.test_history.save_to_mlflow()
-            self.best_model_test_history.save_to_mlflow()
-
-            plot = Plotter(train_dict=self.train_history.get_as_dict(),
-                           val_dict=self.val_history.get_as_dict(),
-                           test_dict=self.test_history.get_as_dict(),
-                           test_dict_best_model=self.best_model_test_history.get_as_dict(), save_path=self.paths)
-            plot.produce_plots()
-        else:
-            raise ValueError("History object is None, initialize train, val, test and best test history objects!")
-
-        if self.mc_history is not None:
-            self.mc_history.save_to_pickle()
-
-    def prepare_run(self):
-        if self.run_name is not None:
-            mlflow.start_run(run_name=self.run_name)
-        else:
-            mlflow.start_run()
-        add_config_information(config=self.param, dataset="CAUEEG")
-        train_loader, val_loader, test_loader = self.prepare_data()
-        self.add_dataset_hyperparameters()
-        return train_loader, val_loader, test_loader
-
-    def add_dataset_hyperparameters(self):
-        if self.dataset is not None:
-            hyperparameters = {"in_channels": self.dataset.num_channels,
-                               "num_classes": self.dataset.num_classes,
-                               "time_steps": self.dataset.eeg_len,
-                               "save_path": self.paths,
-                               "lr": self.learning_rate}
-            self.kwargs.update(hyperparameters)
-        else:
-            raise ValueError("Dataset is not provided!")
-
-    def cleanup_function(self):
-        """
-        Attempts to delete the specified folder and its contents.
-
-        Notes
-        -----
-        - This function uses `shutil.rmtree` to delete the folder and all its contents.
-        - Error handling is implemented to catch and log exceptions, preventing the function from raising exceptions if
-          the folder cannot be deleted (e.g., if the folder does not exist or an error occurs during deletion).
-        """
-        try:
-            shutil.rmtree(self.paths)
-            print(f"Successfully deleted the folder: {self.paths} due to OOMemory")
-        except Exception as e:
-            print(f"Error deleting the folder: {self.paths}. Exception: {e}")

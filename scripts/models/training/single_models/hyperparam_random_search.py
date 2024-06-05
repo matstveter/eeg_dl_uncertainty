@@ -10,12 +10,8 @@ def generate_random_hyperparameters():
     random.seed()
     # Package the parameters into a dictionary
     parameters = {
-        'batch_size': random.choice([32, 64, 128]),
         'learning_rate': random.choice([0.05, 0.01, 0.001, 0.0001]),
-        'num_seconds': random.choice([20, 30, 60]),
         'depth': random.choice([2, 3, 6, 9, 12]),
-        'eeg_epochs': random.choice([1, 2, 3, 4, 5]),
-        'epoch_overlap': random.choice([True, False]),
         'classifier_name': random.choice(['InceptionNetwork', 'InceptionWide']),
         'age_scaling': random.choice(['standard', 'min_max']),
     }

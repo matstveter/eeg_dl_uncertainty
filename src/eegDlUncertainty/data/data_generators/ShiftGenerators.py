@@ -1,19 +1,20 @@
 from typing import Optional, Tuple
 
+import mne.io
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-import matplotlib.pyplot as plt
 
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
 
 
-class EEGDatashift(Dataset):
+class EEGDatashiftGenerator(Dataset):
     def __init__(self, subjects: Tuple[str, ...], dataset: CauEEGDataset, use_age: bool, shift_intensity, shift_type,
                  device: Optional[torch.device] = None):
         super().__init__()
         self._use_age = use_age
         self._shift_type = shift_type
+        self._eeg_info = dataset.eeg_info
 
         if not 1.0 >= shift_intensity >= 0:
             raise ValueError("Shift intensity should be between 0.0 and 1.0.")
@@ -34,10 +35,20 @@ class EEGDatashift(Dataset):
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device is None else device
 
     def apply_shift(self, data, targets):
-        if self._shift_type == "class_combination":
-            return self._combine_eeg(data=data, targets=targets)
+        if self._shift_type == "class_combination_spatial":
+            return self._combine_eeg(data=data, targets=targets, spatial=True)
+        elif self._shift_type == "class_combination_temporal":
+            return self._combine_eeg(data=data, targets=targets, spatial=False)
+        elif self._shift_type in ("timereverse", "signflip", "gaussian_channel"):
+            return self._channel_augmentations(data)
+        elif self._shift_type == "interpolate":
+            return self._interpolate_augment(data=data)
+        elif self._shift_type == "gaussian":
+            return self._gaussian(data=data)
+        else:
+            raise KeyError("Shift type not recognized")
 
-    def _combine_eeg(self, data, targets):
+    def _combine_eeg(self, data, targets, spatial=True):
         """
         Combine EEG data from different classes by mixing specified channels.
 
@@ -95,13 +106,13 @@ class EEGDatashift(Dataset):
 
         new_normal_eeg = self._mix_eeg(indices_current=normal_indices,
                                        indices_class_to_mix=dementia_normal_indices,
-                                       eeg=data, channels_to_mix=channels_to_mix)
+                                       eeg=data, channels_to_mix=channels_to_mix, spatial=spatial)
         new_mci_eeg = self._mix_eeg(indices_current=mci_indices,
                                     indices_class_to_mix=dementia_mci_indices,
-                                    eeg=data, channels_to_mix=channels_to_mix)
+                                    eeg=data, channels_to_mix=channels_to_mix, spatial=spatial)
         new_dementia_eeg = self._mix_eeg(indices_current=dementia_indices,
                                          indices_class_to_mix=normal_dementia_indices,
-                                         eeg=data, channels_to_mix=channels_to_mix)
+                                         eeg=data, channels_to_mix=channels_to_mix, spatial=spatial)
 
         all_mixed_eeg = np.zeros_like(data)
         self._place_eeg(indices=normal_indices, mixed_eeg=new_normal_eeg, final_mix_array=all_mixed_eeg)
@@ -133,8 +144,7 @@ class EEGDatashift(Dataset):
         for ind in indices:
             final_mix_array[ind] = mixed_eeg[ind]
 
-    @staticmethod
-    def _mix_eeg(indices_current, indices_class_to_mix, eeg, channels_to_mix):
+    def _mix_eeg(self, indices_current, indices_class_to_mix, eeg, channels_to_mix, spatial):
         """
         Mix specified EEG channels from one set of indices with another.
 
@@ -171,12 +181,120 @@ class EEGDatashift(Dataset):
             eeg_cur = eeg_cp[ind_cur]
             eeg_mix = eeg_cp[ind_mix]
 
-            for i in range(eeg_cur.shape[0]):
-                if i in channels_to_mix:
-                    eeg_cur[i] = eeg_mix[i]
+            if spatial:
+                for i in range(eeg_cur.shape[0]):
+                    if i in channels_to_mix:
+                        eeg_cur[i] = eeg_mix[i]
+            else:
+                # Maximum augmentation is set to 0.5 of the original signal
+                keep_time_steps = int((eeg_cur.shape[1] * (1 - self._shift_intensity * 0.5)))
+
+                eeg_part_cur = eeg_cur[:, 0: keep_time_steps]
+                eeg_part_mix = eeg_mix[:, keep_time_steps:]
+                eeg_cur = np.concatenate((eeg_part_cur, eeg_part_mix), axis=1)
 
             finished[ind_cur] = eeg_cur
         return finished
+
+    def _channel_augmentations(self, data):
+        """ THis channel performs shifts on channels.
+
+        The augmentation order is specified as every other channel, and
+        then the channels that were skipped. It uses the shift_intensity to sub-select which channels that should be
+        augmented. It loops through the data array and then if the channel of a subject is in the sub-selected
+        channels:
+
+        Timereverse: Flip the signal so that the first time step is the last
+
+        Shift: Multiply the signal with -1, effectively flipping the sign of the signal
+
+        Parameters
+        ----------
+        data: np.ndarray
+            [n_subject, n_channels, n_timesteps] array with eegs for the subjects in the test set
+
+        Returns
+        -------
+        altered_array: np.ndarray
+            Array with the changes implemented
+        """
+
+        augment_order = [1, 3, 5, 7, 9, 11, 13, 15, 17, 0, 2, 4, 6, 8, 10, 12, 14, 16, 18]
+        cur_channel_to_augment = augment_order[0: int(self._shift_intensity * len(augment_order))]
+
+        altered_array = np.zeros_like(data)
+
+        for i, sub in enumerate(data):
+            for j, ch in enumerate(sub):
+                # If the current channel is in the list of channels that should be reversed
+                if j in cur_channel_to_augment:
+                    if self._shift_type == "timereverse":
+                        new_arr = np.flip(ch, axis=0)
+                    elif self._shift_type == "signflip":
+                        new_arr = ch * -1
+                    elif self._shift_type == "gaussian_channel":
+                        noise = np.random.normal(0, 0.1, ch.shape)
+                        new_arr = ch + noise
+                    else:
+                        raise ValueError("Unrecognized shift type")
+                else:
+                    new_arr = ch
+                altered_array[i][j] = new_arr
+
+        return altered_array
+
+    def _interpolate_augment(self, data):
+        """
+        Interpolate bad channels in EEG data and augment the dataset.
+
+        Parameters
+        ----------
+        data : array-like
+            The EEG data to be augmented. Each element in the array represents
+            the EEG recording for a subject.
+
+        Returns
+        -------
+        altered_array : ndarray
+            The augmented EEG data with bad channels interpolated.
+        """
+        # Define the order of channels to augment, excluding the first channel
+        augment_order = [1, 3, 5, 7, 9, 11, 13, 15, 17, 2, 4, 6, 8, 10, 12, 14, 16, 18]
+
+        # Determine the channels to augment based on the shift intensity
+        cur_channel_to_augment = augment_order[0: int(self._shift_intensity * len(augment_order))]
+
+        # Extract EEG channel information
+        info_object = self._eeg_info
+        montage = mne.channels.make_standard_montage('standard_1020')
+        info_object.set_montage(montage)
+        channel_names = info_object['ch_names']
+
+        # Select the channel names to interpolate based on the indices
+        channels_to_interpolate = [channel_names[i] for i in cur_channel_to_augment]
+
+        # Initialize an array to store the altered EEG data
+        altered_array = np.zeros_like(data)
+
+        print(channels_to_interpolate)
+        # Loop through each subject's data and interpolate bad channels
+        for i, sub in enumerate(data):
+            raw = mne.io.RawArray(sub, info_object, verbose=False)
+            raw.info['bads'] = channels_to_interpolate
+            raw.interpolate_bads(verbose=False, method="MNE")
+            altered_array[i] = raw.get_data()
+
+        return altered_array
+
+    def _gaussian(self, data):
+        altered_array = np.zeros_like(data)
+
+        for i, sub in enumerate(data):
+            noise = np.random.normal(0, self._shift_intensity, sub.shape)
+            noisy_sub = sub + noise
+            altered_array[i] = noisy_sub
+
+        return altered_array
 
     @property
     def x(self) -> torch.Tensor:

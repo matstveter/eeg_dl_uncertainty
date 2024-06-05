@@ -33,3 +33,26 @@ class BaseClassifier(nn.Module):
 
         # Save
         torch.save(state, f"{path}")
+
+    @classmethod
+    def load(cls, path: str):
+        """
+        Method for loading
+        Args:
+            path: Path to load the object from
+
+        Returns: Loaded model
+        """
+        # Load the state
+        state = torch.load(path)
+
+        # Create an instance of the class with the saved hyperparameters
+        model = cls(**state["hyperparameters"])
+
+        # Load the saved state dictionary into the model
+        model.load_state_dict(state["state_dict"])
+
+        # Set the classifier name
+        model._name = state["classifier_name"]
+
+        return model

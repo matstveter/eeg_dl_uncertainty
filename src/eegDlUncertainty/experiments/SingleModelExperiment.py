@@ -2,25 +2,21 @@ import torch.cuda
 import mlflow
 
 from eegDlUncertainty.data.results.dataset_shifts import evaluate_dataset_shifts
-from eegDlUncertainty.data.results.history import MCHistory
+from eegDlUncertainty.data.results.history import MCHistory, get_history_object
 from eegDlUncertainty.data.results.uncertainty import get_uncertainty_metrics
 from eegDlUncertainty.experiments.mainExperiment import BaseExperiment
+from eegDlUncertainty.models.classifiers.main_classifier import MCClassifier, MainClassifier
 from eegDlUncertainty.models.classifiers.swag_classifier import SWAGClassifier
 
 
 class SingleModelExperiment(BaseExperiment):
     def create_model(self, **kwargs):
-        if self.dataset is not None:
-            hyperparameters = {"in_channels": self.dataset.num_channels,
-                               "num_classes": self.dataset.num_classes,
-                               "time_steps": self.dataset.eeg_len,
-                               "save_path": self.paths,
-                               "lr": self.learning_rate}
-            kwargs.update(hyperparameters)
-            self.model = self.get_model(model_name=self.model_name, **kwargs)
+        self.model = MainClassifier(model_name=self.model_name, **kwargs)
 
-        else:
-            raise ValueError("Dataset is not provided!")
+    def train(self, train_loader, val_loader, train_history, val_history):
+        self.model.fit_model(train_loader=train_loader, val_loader=val_loader, training_epochs=self.train_epochs,
+                             device=self.device, loss_fn=self.criterion, earlystopping_patience=self.earlystopping,
+                             train_hist=train_history, val_history=val_history)
 
     def run(self):
         # Start mflow, get data
@@ -52,10 +48,12 @@ class MCDExperiment(BaseExperiment):
     def create_model(self, **kwargs):
         if not kwargs['mc_dropout_enabled']:
             kwargs['mc_dropout_enabled'] = True
-        self.model = self.get_model(model_name=self.model_name, **kwargs)
+        self.model = MCClassifier(model_name=self.model_name, **kwargs)
 
-    def mc_dropout(self, test_loader, history):
-        self.model.get_mc_predictions(test_loader=test_loader, device=self.device, history=history)
+    def train(self, train_loader, val_loader, train_history, val_history):
+        self.model.fit_model(train_loader=train_loader, val_loader=val_loader, training_epochs=self.train_epochs,
+                             device=self.device, loss_fn=self.criterion, earlystopping_patience=self.earlystopping,
+                             train_hist=train_history, val_history=val_history)
 
     def run(self):
         # Start mflow, get data
@@ -76,7 +74,7 @@ class MCDExperiment(BaseExperiment):
 
             # todo We can perhaps also use SWA as an option for all classifiers? At least test and save the performance
 
-            self.mc_dropout(test_loader=test_loader, history=mc_history)
+            self.model.get_mc_predictions(test_loader=test_loader, device=self.device, history=mc_history)
             mlflow.log_metric("MC Dropout Performance", mc_history.ensemble_accuracy)
 
             probs, targets = mc_history.get_prediction_set
@@ -144,7 +142,6 @@ class SWAGExperiment(BaseExperiment):
             # todo save data from MCD experiment, all predictions from the models
             # todo Brier score, ECE, NLL
             # todo Test on new samples that have been augmented
-
 
             self.finish_run()
 

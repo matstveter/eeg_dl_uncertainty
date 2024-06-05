@@ -1,15 +1,11 @@
-import math
 import multiprocessing
 import os
 import shutil
 import time
 from typing import Any, Dict, Tuple, Union
 import numpy as np
-import mne
 
-from autoreject import AutoReject
 
-from eegDlUncertainty.data.dataset.dataset_creator_autoreject import process_eeg_data_autoreject
 from eegDlUncertainty.data.utils import read_eeg_file, read_json_file
 
 

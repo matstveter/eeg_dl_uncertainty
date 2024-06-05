@@ -5,6 +5,7 @@ import seaborn as sns
 import mlflow
 import numpy as np
 import matplotlib
+
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import torch
@@ -764,7 +765,7 @@ class MCHistory:
 
             plt.legend(fontsize=self.size_of_font)
         self._save_or_show(filename=f"histogram_{metric_name.strip()}")
-    
+
     def plot_metric_vs_accuracy(self, metric_data, metric_name):
         """
         Create a scatter plot of a given metric against accuracy.
@@ -845,3 +846,9 @@ class MCHistory:
 
     def save_to_mlflow(self):
         mlflow.log_metric()
+
+
+def get_history_objects(num_classes, train_loader, val_loader, save_path):
+    train_history = History(num_classes=num_classes, set_name="train", loader_lenght=len(train_loader), save_path=save_path)
+    val_history = History(num_classes=num_classes, set_name="val", loader_lenght=len(val_loader), save_path=save_path)
+    return train_history, val_history

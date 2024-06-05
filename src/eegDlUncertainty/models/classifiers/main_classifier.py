@@ -10,7 +10,6 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.nn.modules.loss import _Loss
 
-from eegDlUncertainty.data.results.conformal import AdaptivePredictionSets, ConformalPredictionEqualWeighted
 from eegDlUncertainty.data.results.history import History, MCHistory
 from eegDlUncertainty.models.get_models import get_models
 
@@ -21,7 +20,6 @@ class MainClassifier(abc.ABC, nn.Module):
 
         # Value used for temperature scaling...
         self.temperature = torch.nn.Parameter(torch.ones(1))
-        self.conformal_classifier = None
 
         if pretrained is not None:
             self.classifier = self.from_disk(path=pretrained)
@@ -173,8 +171,8 @@ class MainClassifier(abc.ABC, nn.Module):
 
             if val_history.get_last_loss() < best_loss:
                 best_loss = val_history.get_last_loss()
-                path = os.path.join(self._model_path, f"{self._name}_model")
-                self.classifier.save(path=path)
+                best_path = os.path.join(self._model_path, f"{self._name}_model")
+                self.classifier.save(path=best_path)
                 epochs_with_no_improvement = 0
             else:
                 epochs_with_no_improvement += 1
@@ -187,6 +185,9 @@ class MainClassifier(abc.ABC, nn.Module):
         path = os.path.join(self._model_path, f"{self._name}_last_model")
         self.classifier.save(path=path)
         self.save_hyperparameters()
+
+        # Set the current model to the best model during training
+        self.classifier = self.classifier.load(path=best_path)
 
     def test_model(self, *, test_loader: DataLoader, device: torch.device, test_hist: History, loss_fn: _Loss):
         self.to(device)
@@ -316,6 +317,22 @@ class MainClassifier(abc.ABC, nn.Module):
         mlflow.log_metric(f"Optimal temperature {model_name}", self.temperature.item())
         print(f"Optimal temperature {model_name}", self.temperature.item())
 
+    def _get_predictions(self, loader, device):
+        self.eval()
+        preds, ground_truth = [], []
+        with torch.no_grad():
+            for inp, lab in loader:
+                inputs, label = inp.to(device), lab.to(device)
+                outputs = self.predict_prob(inputs)
+                preds.extend(outputs.cpu().numpy())
+                ground_truth.extend(label.cpu().numpy())
+        return np.array(preds), np.array(ground_truth)
+
+    def save_model(self, path):
+        self.classifier.save(path=path)
+
+
+class MCClassifier(MainClassifier):
     def get_mc_predictions(self, *, test_loader: DataLoader, device: torch.device, history: MCHistory = None,
                            num_forward=50):
         """
@@ -388,39 +405,3 @@ class MainClassifier(abc.ABC, nn.Module):
             history.calculate_metrics()
         else:
             return np.array(logits_per_pass), np.array(target_classes)
-
-    def conformal_prediction(self, *, val_loader, test_loader, criterion, device, use_temp_scaling, alpha=0.2,
-                             conformal_algorithm="RAPS"):
-
-        # If temperature is 1.0, it means that it has not yet been optimzed....
-        if use_temp_scaling and self.temperature.item() == 1.0:
-            self.set_temperature(val_loader=val_loader, criterion=criterion, device=device,
-                                 model_name="conformal")
-
-        if conformal_algorithm == "equal_weighted":
-            self.conformal_classifier = ConformalPredictionEqualWeighted(alpha=alpha)
-        elif conformal_algorithm == "RAPS":
-            self.conformal_classifier = AdaptivePredictionSets(alpha=alpha, lam_reg=0.1)
-        elif conformal_algorithm == "APS":
-            self.conformal_classifier = AdaptivePredictionSets(alpha=alpha, lam_reg=0)
-
-        val_predictions, val_labels = self._get_predictions(loader=val_loader, device=device)
-        self.conformal_classifier.calibrate(cal_softmax_pred=val_predictions, cal_labels=val_labels)
-        test_predictions, test_labels = self._get_predictions(loader=test_loader, device=device)
-        self.conformal_classifier.predict(test_softmax_pred=test_predictions)
-        coverage = self.conformal_classifier.evaluate(test_labels=test_labels)
-        return coverage
-
-    def _get_predictions(self, loader, device):
-        self.eval()
-        preds, ground_truth = [], []
-        with torch.no_grad():
-            for inp, lab in loader:
-                inputs, label = inp.to(device), lab.to(device)
-                outputs = self.predict_prob(inputs)
-                preds.extend(outputs.cpu().numpy())
-                ground_truth.extend(label.cpu().numpy())
-        return np.array(preds), np.array(ground_truth)
-
-    def save_model(self, path):
-        self.classifier.save(path=path)
