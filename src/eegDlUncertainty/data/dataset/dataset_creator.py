@@ -3,8 +3,11 @@ import os
 import shutil
 import time
 from typing import Any, Dict, Tuple, Union
-import numpy as np
 
+import mne
+import numpy as np
+import openneuro
+import pandas as pd
 
 from eegDlUncertainty.data.utils import read_eeg_file, read_json_file
 
@@ -294,81 +297,9 @@ def process_eeg_file(sub_eeg, eeg_path, events, preprocess, nyquist, out_p):
         raw_eeg_data.resample(new_sampling_rate, verbose=False)
 
     data = raw_eeg_data.get_data()
-
-    if ".set" in str(sub_eeg):
-        data = sub_select_channels(data)
-
     save_path = os.path.join(out_p, f"{subject_id}.npy")
     np.save(save_path, data)
     print(f"{subject_id}: Done")
-
-
-def sub_select_channels(data: np.ndarray) -> np.ndarray:
-    """
-    Selects and reorders EEG data channels based on a predefined mapping.
-
-    This function iterates through a predefined dictionary `channel_map`, which contains EEG channel names as keys and
-    their respective indices as values. It then gathers the data for these channels, handles a special case for the 'Cz'
-     channel, and returns the reordered data as a NumPy array.
-
-    Parameters
-    ----------
-    data : array_like
-        The original EEG data array from which to select and reorder channels. The array should be indexed according
-        to channel indices.
-
-    Returns
-    -------
-    new_sub_selected_eeg : ndarray
-        A NumPy array containing the selected and reordered EEG channel data.
-
-    Notes
-    -----
-    The `channel_map` dictionary within the function maps channel names to indices. A special case is included for the
-    'Cz' channel, where it is mapped to a placeholder value in the dictionary but is assigned a specific index
-    within the function.
-
-    Examples
-    --------
-    Assume `data` is an array where each index corresponds to a channel's data. Calling `sub_select_channels(data)`
-    will return a new array with the channels reordered according to `channel_map`.
-
-    """
-    channel_map = {'Fp1': 22,
-                   'Fp2': 9,
-                   'F7': 33,
-                   'F3': 24,
-                   'Fz': 11,
-                   'F4': 124,
-                   'F8': 122,
-                   'FC3': 29,
-                   'FCz': 6,
-                   'FC4': 111,
-                   'T3': 45,
-                   'C3': 36,
-                   'C4': 104,
-                   'T4': 108,
-                   'CP3': 42,
-                   'CPz': 55,
-                   'CP4': 93,
-                   'T5': 58,
-                   'P3': 52,
-                   'Pz': 62,
-                   'P4': 92,
-                   'T6': 96,
-                   'O1': 70,
-                   'Cz': 'Cz'}
-
-    new_sub_selected_eeg = []
-    for key, val in channel_map.items():
-        if val == "Cz":
-            channel_key = 128
-        else:
-            channel_key = val
-        new_sub_selected_eeg.append(data[channel_key])
-    new_sub_selected_eeg = np.array(new_sub_selected_eeg)
-
-    return new_sub_selected_eeg
 
 
 def create_eeg_dataset(conf_path: str):
@@ -415,9 +346,187 @@ def create_eeg_dataset(conf_path: str):
         raise FileNotFoundError(f"Could not find json file '{conf_path}' in folder '{os.path.dirname(__file__)}'!")
 
     if isinstance(config, dict):
-        # Now it's safe to pass config as it's confirmed to be a Dict
-        process_eeg_data(config=config, conf_path=conf_path)
-        # process_eeg_data_autoreject(config=config)
+        if "tdbrain" in conf_path:
+            if "SAMPLE" in conf_path:
+                create_tdbrain_dataset(config=config, conf_path=conf_path)
+            else:
+                create_full_tdbrain_dataset(config=config, conf_path=conf_path)
+        elif "greek" in conf_path:
+            create_greek_dataset(config=config, conf_path=conf_path)
+        else:
+            # Now it's safe to pass config as it's confirmed to be a Dict
+            process_eeg_data(config=config, conf_path=conf_path)
+            # process_eeg_data_autoreject(config=config)
     else:
         # Handle the case where config is not a Dict, maybe raise an error or log a warning
         raise TypeError("Expected config to be a dictionary")
+
+
+def get_cau_eeg_channels():
+    return ['Fp1', 'F3', 'C3', 'P3', 'O1', 'Fp2', 'F4', 'C4',
+            'P4', 'O2', 'F7', 'T3', 'T5', 'F8', 'T4', 'T6', 'Fz', 'Cz', 'Pz']
+
+
+def create_tdbrain_dataset(config, conf_path):
+    """ This function is used to generate EEGs with the same preprocessing steps as CAUEEG.
+
+    TDbrain article: https://www.nature.com/articles/s41597-022-01409-z
+
+    Parameters
+    ----------
+    config: dict
+        preprocessing steps, paths etc.
+    conf_path: path to config file
+
+    Returns
+    -------
+
+    """
+    if "eeg_data" in config['file_paths']:
+        eeg_path = config['file_paths']['eeg_data']
+    else:
+        raise ValueError("Please specify the path to the EEG files in the config file in the script folder. "
+                         "\nkey: 'eeg_data': path")
+
+    data_info = pd.read_csv(os.path.join(eeg_path, "participants.tsv"), sep='\t').to_dict()['participant_id']
+    outp_path = create_output_folder(base_path=config['file_paths']['output_directory'])
+    desired_channels = get_cau_eeg_channels()
+
+    ext = "ses-1/eeg/"
+
+    rename_dict = {
+        'T7': 'T3',
+        'T8': 'T4',
+        'P7': 'T5',
+        'P8': 'T6'
+    }
+    preprocess = config['preprocessing']
+
+    for sub in data_info.values():
+        eeg_file = os.path.join(eeg_path, sub, ext, f"{sub}_ses-1_task-restEC_eeg.vhdr")
+        raw = mne.io.read_raw_brainvision(vhdr_fname=eeg_file, preload=True, verbose=False)
+        raw.rename_channels(rename_dict, verbose=False)
+        raw.pick(desired_channels, verbose=False)
+
+        # preprocessing
+        raw.crop(tmin=30, tmax=90, verbose=False, include_tmax=False)
+
+        # Lowpass and high_pass filter the data
+        raw.filter(l_freq=preprocess['low_freq'], h_freq=preprocess['high_freq'], verbose=False)
+
+        # Set it to the same as CAUEGG
+        raw.resample(200, verbose=False)
+
+        data = raw.get_data()
+
+        save_path = os.path.join(outp_path, f"{sub}.npy")
+        np.save(save_path, data)
+        print(f"{sub}: Done")
+
+    shutil.copy(src=conf_path, dst=outp_path)
+
+
+def create_full_tdbrain_dataset(config, conf_path):
+    """ This function is used to generate EEGs with the same preprocessing steps as CAUEEG.
+
+    TDbrain article: https://www.nature.com/articles/s41597-022-01409-z
+
+    Parameters
+    ----------
+    config: dict
+        preprocessing steps, paths etc.
+    conf_path: path to config file
+
+    Returns
+    -------
+
+    """
+    if "eeg_data" in config['file_paths']:
+        eeg_path = config['file_paths']['eeg_data']
+    else:
+        raise ValueError("Please specify the path to the EEG files in the config file in the script folder. "
+                         "\nkey: 'eeg_data': path")
+
+    data_info = pd.read_csv(os.path.join(eeg_path, "TDBRAIN_participants_V2.tsv"), sep='\t')
+
+    filtered_data = data_info[data_info['indication'] == "HEALTHY"]
+
+    outp_path = create_output_folder(base_path=config['file_paths']['output_directory'])
+    desired_channels = get_cau_eeg_channels()
+
+    ext = "ses-1/eeg/"
+
+    rename_dict = {
+        'T7': 'T3',
+        'T8': 'T4',
+        'P7': 'T5',
+        'P8': 'T6'
+    }
+    preprocess = config['preprocessing']
+
+    for sub in filtered_data['participants_ID']:
+        eeg_file = os.path.join(eeg_path, sub, ext, f"{sub}_ses-1_task-restEC_eeg.vhdr")
+        raw = mne.io.read_raw_brainvision(vhdr_fname=eeg_file, preload=True, verbose=False)
+        raw.rename_channels(rename_dict, verbose=False)
+        raw.pick(desired_channels, verbose=False)
+
+        # preprocessing
+        raw.crop(tmin=30, tmax=90, verbose=False, include_tmax=False)
+
+        # Lowpass and high_pass filter the data
+        raw.filter(l_freq=preprocess['low_freq'], h_freq=preprocess['high_freq'], verbose=False)
+
+        # Set it to the same as CAUEGG
+        raw.resample(200, verbose=False)
+        raw.set_eeg_reference('average', verbose=False)
+
+        data = raw.get_data()
+
+        save_path = os.path.join(outp_path, f"{sub}.npy")
+        np.save(save_path, data)
+        print(f"{sub}: Done")
+
+    shutil.copy(src=conf_path, dst=outp_path)
+
+
+def create_greek_dataset(config, conf_path):
+    if "eeg_data" in config['file_paths']:
+        eeg_path = config['file_paths']['eeg_data']
+    else:
+        raise ValueError("Please specify the path to the EEG files in the config file in the script folder. "
+                         "\nkey: 'eeg_data': path")
+
+    data_info = pd.read_csv(os.path.join(eeg_path, "participants.tsv"), sep='\t').to_dict()['participant_id']
+
+    if config['use_derivatives']:
+        eeg_path = os.path.join(eeg_path, "derivatives")
+        output_path = os.path.join(config['file_paths']['output_directory'], "derivatives")
+    else:
+        output_path = config['file_paths']['output_directory']
+
+    outp_path = create_output_folder(base_path=output_path)
+    desired_channels = get_cau_eeg_channels()
+    preprocess = config['preprocessing']
+
+    for sub in data_info.values():
+        file_path = os.path.join(eeg_path, sub, "eeg", f"{sub}_task-eyesclosed_eeg.set")
+        raw = mne.io.read_raw_eeglab(input_fname=file_path, verbose=False, preload=True)
+        raw.pick(desired_channels, verbose=False)
+        raw.crop(tmin=30, tmax=90, verbose=False, include_tmax=False)
+
+        # Lowpass and high_pass filter the data
+        raw.filter(l_freq=preprocess['low_freq'], h_freq=preprocess['high_freq'], verbose=False)
+
+        # Set it to the same as CAUEGG
+        raw.resample(200, verbose=False)
+
+        raw.set_eeg_reference('average', verbose=False)
+
+        data = raw.get_data()
+
+        save_path = os.path.join(outp_path, f"{sub}.npy")
+        np.save(save_path, data)
+        print(f"{sub}: Done")
+
+    shutil.copy(src=conf_path, dst=outp_path)
+

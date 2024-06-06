@@ -179,6 +179,8 @@ def main():
                 # todo Evaluate dataset shifts, performance and calibration
                 # todo Save history objects, create plots ++
 
+                # todo Test on greek eeg, mpi and tdbrain
+
             finally:
                 mlflow.end_run()
 

@@ -21,14 +21,12 @@ from eegDlUncertainty.models.classifiers.main_classifier import MCClassifier, Ma
 
 
 def generate_data_hyperparameters():
-    param_grid = {
-        'num_seconds': [5, 10, 15, 20, 30, 40, 50, 60],
-        'age_scaling': ["min_max", "standard"],
-        'eeg_epochs': ['all', 'random', 'spread']
-    }
-    keys, values = zip(*param_grid.items())
-    for combination in itertools.product(*values):
-        yield dict(zip(keys, combination))
+    possible_augmentations = ['gaussiannoise', 'timereverse', 'signflip', 'ftsurrogate', 'channelsshuffle',
+                              'channelsdropout', 'smoothtimemask', 'bandstopfilter']
+
+    for r in range(1, len(possible_augmentations) + 1):
+        for combination in itertools.combinations(possible_augmentations, r):
+            yield combination
 
 
 def main():
@@ -53,11 +51,11 @@ def main():
     use_test_set: bool = parameters.pop("use_test_set", False)
     save_path: str = parameters.pop("save_path")
     model_name: str = parameters.get("classifier_name")
-    
+
     experiment_path, folder_name = setup_experiment_path(save_path=save_path,
                                                          config_path=config_path,
                                                          model_name=model_name)
-    experiment_name = "Dataset_search"
+    experiment_name = "augment_search"
     prepare_experiment_environment(experiment_name=experiment_name)
 
     if mlflow.active_run() is not None:
@@ -117,8 +115,10 @@ def main():
             #########################################################################################################
             train_gen = CauDataGenerator(subjects=train_subjects, dataset=dataset, device=device, split="train",
                                          use_age=use_age)
-            val_gen = CauDataGenerator(subjects=val_subjects, dataset=dataset, device=device, split="val", use_age=use_age)
-            test_gen = CauDataGenerator(subjects=test_subjects, dataset=dataset, device=device, split="test", use_age=use_age)
+            val_gen = CauDataGenerator(subjects=val_subjects, dataset=dataset, device=device, split="val",
+                                       use_age=use_age)
+            test_gen = CauDataGenerator(subjects=test_subjects, dataset=dataset, device=device, split="test",
+                                        use_age=use_age)
 
             #########################################################################################################
             # Loaders

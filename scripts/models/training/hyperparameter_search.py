@@ -1,5 +1,4 @@
 import argparse
-import itertools
 import os
 import random
 from typing import List, Optional, Union
@@ -21,17 +20,28 @@ from eegDlUncertainty.models.classifiers.main_classifier import MCClassifier, Ma
 
 
 def generate_data_hyperparameters():
-    param_grid = {
-        'num_seconds': [5, 10, 15, 20, 30, 40, 50, 60],
-        'age_scaling': ["min_max", "standard"],
-        'eeg_epochs': ['all', 'random', 'spread']
+    random.seed()
+    params = {
+        'cnn_units': random.choice(range(8, 64, 4)),
+        'depth': random.choice([2, 3, 4, 5, 6, 9, 12]),
+        'max_kernel_size': random.choice([20, 40, 60, 80, 120]),
+        'mc_dropout_enabled': random.choice([True, False]),
+        'fc_bool': [True, False],
+        'fc_act': [True, False],
+        'fc_batch': [True, False],
     }
-    keys, values = zip(*param_grid.items())
-    for combination in itertools.product(*values):
-        yield dict(zip(keys, combination))
+    
+    if params['mc_dropout_enabled']:
+        temp = {"mc_dropout_rate": random.choice([0.1, 0.25, 0.5])}
+        params.update(temp)
+
+    return params
 
 
 def main():
+
+    NUM_RANDOM_SEARCH = 200
+
     #########################################################################################################
     # Get arguments and read config file
     #########################################################################################################
@@ -57,14 +67,16 @@ def main():
     experiment_path, folder_name = setup_experiment_path(save_path=save_path,
                                                          config_path=config_path,
                                                          model_name=model_name)
-    experiment_name = "Dataset_search"
+    experiment_name = "Hyperparameter_search"
     prepare_experiment_environment(experiment_name=experiment_name)
 
     if mlflow.active_run() is not None:
         mlflow.end_run()
 
     with mlflow.start_run(run_name=folder_name):
-        for i, gen_params in enumerate(generate_data_hyperparameters()):
+        for i in range(NUM_RANDOM_SEARCH):
+            gen_params = generate_data_hyperparameters()
+
             parameters = get_parameters_from_config(config_path=config_path)
             mlflow.start_run(run_name=f"dataset_run_{str(i)}", nested=True)
             run_path = create_run_folder(path=experiment_path, index=str(i))
@@ -144,7 +156,10 @@ def main():
             param.update(hyperparameters)
             add_config_information(config=param, dataset="CAUEEG")
 
-            classifier = MainClassifier(model_name=model_name, **hyperparameters)
+            if parameters['mc_droput_enabled']:
+                classifier = MCClassifier(model_name=model_name, **hyperparameters)
+            else:
+                classifier = MainClassifier(model_name=model_name, **hyperparameters)
             train_history, val_history = get_history_objects(train_loader=train_loader, val_loader=val_loader,
                                                              save_path=run_path, num_classes=dataset.num_classes)
             try:
