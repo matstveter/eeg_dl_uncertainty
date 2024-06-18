@@ -4,6 +4,9 @@ import mne.io
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+import matplotlib
+matplotlib.use('TkAgg')
+import matplotlib.pyplot as plt
 
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
 
@@ -15,6 +18,7 @@ class EEGDatashiftGenerator(Dataset):
         self._use_age = use_age
         self._shift_type = shift_type
         self._eeg_info = dataset.eeg_info
+        self._use_notch = True
 
         if not 1.0 >= shift_intensity >= 0:
             raise ValueError("Shift intensity should be between 0.0 and 1.0.")
@@ -39,7 +43,9 @@ class EEGDatashiftGenerator(Dataset):
             return self._combine_eeg(data=data, targets=targets, spatial=True)
         elif self._shift_type == "class_combination_temporal":
             return self._combine_eeg(data=data, targets=targets, spatial=False)
-        elif self._shift_type in ("timereverse", "signflip", "gaussian_channel"):
+        elif self._shift_type in ("timereverse", "signflip", "gaussian_channel", "alpha_bandpass", "beta_bandpass",
+                                  "theta_bandpass", "delta_bandpass", "gamma_bandpass", "hbeta_bandpass",
+                                  "lbeta_bandpass"):
             return self._channel_augmentations(data)
         elif self._shift_type == "interpolate":
             return self._interpolate_augment(data=data)
@@ -235,6 +241,26 @@ class EEGDatashiftGenerator(Dataset):
                     elif self._shift_type == "gaussian_channel":
                         noise = np.random.normal(0, 0.1, ch.shape)
                         new_arr = ch + noise
+                    elif self._shift_type in ("theta_bandpass", "alpha_bandpass", "beta_bandpass", "delta_bandpass",
+                                              "hbeta_bandpass", "lbeta_bandpass", "gamma_bandpass"):
+                        eeg_data = np.copy(ch)
+                        h_freq, l_freq = self._get_freq()
+                        # Ensure data is in 2D format
+                        eeg_data_2d = eeg_data[np.newaxis, :]  # Shape becomes (1, 2000)
+                        # Create MNE info structure
+                        info = mne.create_info(ch_names=['EEG 001'], sfreq=self._eeg_info['sfreq'],
+                                               ch_types=['eeg'])
+                        # Create Raw object
+                        raw = mne.io.RawArray(eeg_data_2d, info)
+                        # High-pass filter to remove frequencies below 12 Hz
+                        raw_high_pass = raw.copy().filter(l_freq=l_freq, h_freq=None, verbose=False)
+
+                        # Low-pass filter to remove frequencies above 8 Hz
+                        raw_low_pass = raw.copy().filter(l_freq=None, h_freq=h_freq, verbose=False)
+
+                        # Combine the filtered signals by adding the data
+                        combined_data = raw_high_pass.get_data() + raw_low_pass.get_data()
+                        new_arr = combined_data
                     else:
                         raise ValueError("Unrecognized shift type")
                 else:
@@ -295,6 +321,26 @@ class EEGDatashiftGenerator(Dataset):
             altered_array[i] = noisy_sub
 
         return altered_array
+
+    def _get_freq(self):
+        freq = self._shift_type.split("_")[0]
+
+        if freq == "alpha":
+            return 8, 12
+        elif freq == "theta":
+            return 4, 8
+        elif freq == "delta":
+            return 1, 4
+        elif freq == "beta":
+            return 12, 30
+        elif freq == "lbeta":
+            return 12, 20
+        elif freq == "hbeta":
+            return 20, 30
+        elif freq == "gamma":
+            return 30, 50
+        else:
+            raise ValueError(f"Frequency band: {freq} is not recognized")
 
     @property
     def x(self) -> torch.Tensor:

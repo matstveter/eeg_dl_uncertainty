@@ -1,0 +1,11 @@
+{"TDBrainDataset": {
+   "base_dataset_path": "/home/tvetern/datasets/ood_datasets/tdbrain/numpy/",
+  "label_dir": "/home/tvetern/datasets/ood_datasets/tdbrain/"
+},"MPILemonDataset": {
+  "base_dataset_path": "/home/tvetern/datasets/ood_datasets/mpi_lemon/numpy/",
+  "label_dir": "/home/tvetern/datasets/ood_datasets/mpi_lemon/"
+}, "GreekEEGDataset": {
+  "base_dataset_path": "/home/tvetern/datasets/ood_datasets/greek_eeg/numpy/",
+  "label_dir": "/home/tvetern/datasets/ood_datasets/greek_eeg/"
+}
+}

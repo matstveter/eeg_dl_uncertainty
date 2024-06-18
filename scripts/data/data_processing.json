@@ -2,7 +2,9 @@
   "preprocessing": {
     "low_freq": 1.0,
     "high_freq": 45.0,
-    "num_seconds_per_subject": 100,
+    "num_seconds_per_subject": 120,
+    "use_end_time": true,
+    "rereference_avg": true,
     "downsample": false,
     "nyquist": 3
   },
@@ -11,5 +13,5 @@
     "eeg_events": "/home/tvetern/datasets/cau_eeg/caueeg-dataset/event/",
     "output_directory": "/home/tvetern/datasets/cau_eeg/numpy/"
   },
-  "use_multiprocessing": false
+  "use_multiprocessing": true
 }

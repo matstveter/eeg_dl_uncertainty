@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
 from eegDlUncertainty.data.data_generators.augmentations import get_augmentations
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
-from eegDlUncertainty.data.results.history import History, MCHistory, get_history_objects
+from eegDlUncertainty.data.results.history import History, get_history_objects
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information
 from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \
     prepare_experiment_environment, \
@@ -19,33 +19,7 @@ from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_
 from eegDlUncertainty.models.classifiers.main_classifier import MCClassifier, MainClassifier
 
 
-def generate_data_hyperparameters():
-    random.seed()
-    params = {
-        'learning_rate': random.choice([0.01, 0.001, 0.0001, 0.00001]),
-        'cnn_units': random.choice(range(8, 64, 4)),
-        'depth': random.choice([2, 3, 4, 5, 6, 9, 12]),
-        'max_kernel_size': random.choice([20, 40, 60, 80, 120]),
-        'mc_dropout_enabled': random.choice([True, False]),
-        'fc_bool': random.choice([True, False]),
-        'fc_act': random.choice([True, False]),
-        'fc_batch': random.choice([True, False]),
-        'num_seconds': random.choice([5, 10, 15, 20, 30, 40, 50, 60]),
-        'age_scaling': random.choice(["min_max", "standard"]),
-        'eeg_epochs': random.choice(['all', 'random', 'spread'])
-    }
-    
-    if params['mc_dropout_enabled']:
-        temp = {"mc_dropout_rate": random.choice([0.1, 0.25, 0.5])}
-        params.update(temp)
-
-    return params
-
-
 def main():
-
-    NUM_RANDOM_SEARCH = 500
-
     #########################################################################################################
     # Get arguments and read config file
     #########################################################################################################
@@ -71,19 +45,22 @@ def main():
     experiment_path, folder_name = setup_experiment_path(save_path=save_path,
                                                          config_path=config_path,
                                                          model_name=model_name)
-    experiment_name = "Hyperparameter_search"
+    experiment_name = "Dataset_version_search"
     prepare_experiment_environment(experiment_name=experiment_name)
 
     if mlflow.active_run() is not None:
         mlflow.end_run()
 
-    with mlflow.start_run(run_name=folder_name):
-        for i in range(NUM_RANDOM_SEARCH):
-            gen_params = generate_data_hyperparameters()
+    dataset_ver = [1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4]
 
+    with mlflow.start_run(run_name=folder_name):
+        for i, d in enumerate(dataset_ver):
             parameters = get_parameters_from_config(config_path=config_path)
             mlflow.start_run(run_name=f"dataset_run_{str(i)}", nested=True)
             run_path = create_run_folder(path=experiment_path, index=str(i))
+
+            gen_params = {'dataset_version': d}
+
             parameters.update(gen_params)
             param = parameters.copy()
 
@@ -162,10 +139,7 @@ def main():
             param.update(hyperparameters)
             add_config_information(config=param, dataset="CAUEEG")
 
-            if parameters['mc_dropout_enabled']:
-                classifier = MCClassifier(model_name=model_name, **hyperparameters)
-            else:
-                classifier = MainClassifier(model_name=model_name, **hyperparameters)
+            classifier = MainClassifier(model_name=model_name, **hyperparameters)
             train_history, val_history = get_history_objects(train_loader=train_loader, val_loader=val_loader,
                                                              save_path=run_path, num_classes=dataset.num_classes)
             try:

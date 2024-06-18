@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
 from eegDlUncertainty.data.data_generators.augmentations import get_augmentations
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
+from eegDlUncertainty.data.dataset.OODDataset import TDBrainDataset
 from eegDlUncertainty.data.results.dataset_shifts import evaluate_dataset_shifts
 from eegDlUncertainty.data.results.history import History, MCHistory, get_history_objects
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information
@@ -123,7 +124,7 @@ def main():
         num_runs = 1
 
         for run_id in range(num_runs):
-            mlflow.start_run(run_name=f"mcd_run_{str(run_id)}", nested=True)
+            mlflow.start_run(run_name=f"normal_{str(run_id)}", nested=True)
             run_path = create_run_folder(path=experiment_path, index=str(run_id))
             hyperparameters = {"in_channels": dataset.num_channels,
                                "num_classes": dataset.num_classes,
@@ -147,20 +148,16 @@ def main():
                 print(f"Cuda Out Of Memory -> Cleanup -> Error message: {e}")
                 break
             else:
-                mc_history = MCHistory(num_classes=dataset.num_classes, save_path=run_path)
-
                 if use_test_set:
                     evaluation_history = History(num_classes=dataset.num_classes, set_name="test",
                                                  loader_lenght=len(test_loader), save_path=run_path)
                     classifier.test_model(test_loader=test_loader, device=device, test_hist=evaluation_history,
                                           loss_fn=criterion)
-                    classifier.get_mc_predictions(test_loader=test_loader, device=device, history=mc_history)
                 else:
                     evaluation_history = History(num_classes=dataset.num_classes, set_name="test_val",
                                                  loader_lenght=len(val_loader), save_path=run_path)
                     classifier.test_model(test_loader=val_loader, device=device, test_hist=evaluation_history,
                                           loss_fn=criterion)
-                    classifier.get_mc_predictions(test_loader=val_loader, device=device, history=mc_history)
 
                 train_history.save_to_mlflow()
                 train_history.save_to_pickle()
@@ -169,20 +166,12 @@ def main():
                 evaluation_history.save_to_mlflow()
                 evaluation_history.save_to_pickle()
 
-                evaluate_dataset_shifts(model=classifier, test_subjects=val_subjects, dataset=dataset,
-                                        device=device, use_age=use_age, monte_carlo=True, batch_size=batch_size)
-
-                # todo Check calibration metrics Brier and ECE
-                # todo Evaluate dataset shifts, performance and calibration
-                # todo Temperature scaling
-                # todo Check calibration metrics Brier and ECE
-                # todo Evaluate dataset shifts, performance and calibration
-                # todo Save history objects, create plots ++
+                # evaluate_dataset_shifts(model=classifier, test_subjects=val_subjects, dataset=dataset,
+                #                         device=device, use_age=use_age, monte_carlo=True, batch_size=batch_size)
 
             finally:
                 mlflow.end_run()
 
-        # todo Create a figure for all
 
 if __name__ == "__main__":
     main()

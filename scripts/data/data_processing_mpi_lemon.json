@@ -1,0 +1,14 @@
+{
+  "preprocessing": {
+    "low_freq": 1.0,
+    "high_freq": 45,
+    "num_seconds_per_subject": 30,
+    "sfreq": 200,
+    "start": 30
+  },
+  "file_paths": {
+    "eeg_data": "/media/hdd/mpi_lemon/",
+    "output_directory": "/home/tvetern/datasets/ood_datasets/mpi_lemon/numpy"
+  },
+  "use_multiprocessing": false
+}

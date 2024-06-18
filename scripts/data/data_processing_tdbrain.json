@@ -7,8 +7,8 @@
     "start": 30
   },
   "file_paths": {
-    "eeg_data": "/media/hdd/greek_eeg/",
-    "output_directory": "/home/tvetern/datasets/ood_datasets/greek_eeg/numpy"
+    "eeg_data": "/media/hdd/tdbrain/",
+    "output_directory": "/home/tvetern/datasets/ood_datasets/tdbrain/numpy/"
   },
   "use_derivatives": false,
   "use_multiprocessing": false

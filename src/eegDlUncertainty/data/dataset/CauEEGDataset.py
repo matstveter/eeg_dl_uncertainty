@@ -57,22 +57,19 @@ class CauEEGDataset:
             raise KeyError(f"Specified dataset version: {dataset_version} does not exist, "
                            f"potential datasets are: {os.listdir(config.get('base_dataset_path'))}")
 
-        print(self._preprocessing_steps)
-
-
         self._ageScaler = AgeScaler(dataset_dict=self._merged_splits, scaling_type=age_scaling)
         self._epochs = epochs
         self._overlapping_epochs = overlapping_epochs
         self._eeg_len = int(eeg_len_seconds * self.get_eeg_info()['sfreq'])
         self._num_seconds = eeg_len_seconds
-        
+
         maximum_epochs = self._preprocessing_steps['num_seconds_per_subject'] / self._num_seconds
 
         if epochs == "all":
             self._epochs = int(maximum_epochs)
         else:
-            self._epochs = int(maximum_epochs/2)
-        
+            self._epochs = int(maximum_epochs / 2)
+
         self._epoch_structure = epochs
         self._eeg_info = self.get_eeg_info()
 
@@ -432,7 +429,6 @@ class CauEEGDataset:
         >>> self.load_eeg_data(('subject1', 'subject2'), plot=True)
         # This will load the EEG data for 'subject1' and 'subject2', plot the raw data, and return the data array.
         """
-
         if split != "train":
             num_epochs = 1
         else:
@@ -474,6 +470,10 @@ class CauEEGDataset:
                     npy_data = epoch_npy_data[:num_epochs, :, :]
                 else:
                     max_num_epochs, _, _ = epoch_npy_data.shape
+
+                    if max_num_epochs < num_epochs:
+                        raise ValueError(f"Not enough epochs for subject: {sub}")
+
                     if self._epoch_structure == "all":
                         if max_num_epochs > num_epochs:
                             npy_data = epoch_npy_data[:num_epochs, :, :]
@@ -483,7 +483,7 @@ class CauEEGDataset:
                         if self._epoch_structure == "random":
                             indices = np.random.choice(max_num_epochs, size=num_epochs, replace=False)
                         else:
-                            indices = np.linspace(0, max_num_epochs-1, num_epochs)
+                            indices = np.linspace(0, max_num_epochs - 1, num_epochs)
                             indices = np.round(indices).astype(int)
                             indices = np.unique(indices)
 

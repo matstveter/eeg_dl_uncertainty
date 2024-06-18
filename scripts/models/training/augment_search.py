@@ -12,12 +12,12 @@ from torch.utils.data import DataLoader
 from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
 from eegDlUncertainty.data.data_generators.augmentations import get_augmentations
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
-from eegDlUncertainty.data.results.history import History, MCHistory, get_history_objects
+from eegDlUncertainty.data.results.history import History, get_history_objects
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information
 from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \
     prepare_experiment_environment, \
     setup_experiment_path
-from eegDlUncertainty.models.classifiers.main_classifier import MCClassifier, MainClassifier
+from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
 
 
 def generate_data_hyperparameters():
@@ -26,7 +26,7 @@ def generate_data_hyperparameters():
 
     for r in range(1, len(possible_augmentations) + 1):
         for combination in itertools.combinations(possible_augmentations, r):
-            yield combination
+            yield {'augmentations': combination}
 
 
 def main():

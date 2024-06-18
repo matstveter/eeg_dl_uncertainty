@@ -1,9 +1,6 @@
-import matplotlib
-matplotlib.use("TkAgg")
 import argparse
 import os
 import random
-import sys
 from typing import List, Optional, Union
 import mlflow
 import numpy
@@ -14,14 +11,14 @@ from torch.utils.data import DataLoader
 from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
 from eegDlUncertainty.data.data_generators.augmentations import get_augmentations
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
-from eegDlUncertainty.data.dataset.OODDataset import GreekEEGDataset, MPILemonDataset, TDBrainDataset
+from eegDlUncertainty.data.dataset.OODDataset import GreekEEGDataset, TDBrainDataset
 from eegDlUncertainty.data.results.dataset_shifts import evaluate_dataset_shifts
 from eegDlUncertainty.data.results.history import History, MCHistory, get_history_objects
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information
 from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \
     prepare_experiment_environment, \
     setup_experiment_path
-from eegDlUncertainty.models.classifiers.main_classifier import MCClassifier
+from eegDlUncertainty.models.classifiers.main_classifier import MCClassifier, MainClassifier
 
 
 def main():
@@ -77,7 +74,7 @@ def main():
     experiment_path, folder_name = setup_experiment_path(save_path=save_path,
                                                          config_path=config_path,
                                                          model_name=model_name)
-    experiment_name = "MCD_experiments"
+    experiment_name = "WE_experiments"
     prepare_experiment_environment(experiment_name=experiment_name)
     #########################################################################################################
     # Dataset
@@ -85,16 +82,6 @@ def main():
     dataset = CauEEGDataset(dataset_version=dataset_version, targets=prediction, eeg_len_seconds=num_seconds,
                             epochs=eeg_epochs, overlapping_epochs=overlapping_epochs, age_scaling=age_scaling)
     train_subjects, val_subjects, test_subjects = dataset.get_splits()
-
-    # # test = TDBrainDataset(dataset_version=dataset_version, num_seconds_eeg=num_seconds, age_scaling=age_scaling)
-    # test = GreekEEGDataset(dataset_version=dataset_version, num_seconds_eeg=num_seconds, age_scaling=age_scaling)
-    # test.load_targets()
-    # test = TDBrainDataset(dataset_version=dataset_version, num_seconds_eeg=num_seconds, age_scaling=age_scaling)
-    # test.load_targets()
-    test = MPILemonDataset(dataset_version=dataset_version, num_seconds_eeg=num_seconds, age_scaling=age_scaling)
-    test.load_targets()
-
-    sys.exit()
 
     if "test" in config_path:
         train_subjects = train_subjects[0:100]
@@ -134,10 +121,13 @@ def main():
 
     with mlflow.start_run(run_name=folder_name):
         # Setup MLFLOW experiment
-        num_runs = 1
+        seeds = [0, 1, 42, 123, 456, 789]
+        classifiers = []
 
-        for run_id in range(num_runs):
-            mlflow.start_run(run_name=f"mcd_run_{str(run_id)}", nested=True)
+        for run_id in range(len(seeds)):
+            torch.manual_seed(seeds[run_id])
+
+            mlflow.start_run(run_name=f"weight_ensemble_{str(run_id)}", nested=True)
             run_path = create_run_folder(path=experiment_path, index=str(run_id))
             hyperparameters = {"in_channels": dataset.num_channels,
                                "num_classes": dataset.num_classes,
@@ -147,7 +137,7 @@ def main():
             param.update(hyperparameters)
             add_config_information(config=param, dataset="CAUEEG")
 
-            classifier = MCClassifier(model_name=model_name, **hyperparameters)
+            classifier = MainClassifier(model_name=model_name, **hyperparameters)
             train_history, val_history = get_history_objects(train_loader=train_loader, val_loader=val_loader,
                                                              save_path=save_path, num_classes=dataset.num_classes)
             try:
@@ -161,20 +151,17 @@ def main():
                 print(f"Cuda Out Of Memory -> Cleanup -> Error message: {e}")
                 break
             else:
-                mc_history = MCHistory(num_classes=dataset.num_classes, save_path=run_path)
 
                 if use_test_set:
                     evaluation_history = History(num_classes=dataset.num_classes, set_name="test",
                                                  loader_lenght=len(test_loader), save_path=run_path)
                     classifier.test_model(test_loader=test_loader, device=device, test_hist=evaluation_history,
                                           loss_fn=criterion)
-                    classifier.get_mc_predictions(test_loader=test_loader, device=device, history=mc_history)
                 else:
                     evaluation_history = History(num_classes=dataset.num_classes, set_name="test_val",
                                                  loader_lenght=len(val_loader), save_path=run_path)
                     classifier.test_model(test_loader=val_loader, device=device, test_hist=evaluation_history,
                                           loss_fn=criterion)
-                    classifier.get_mc_predictions(test_loader=val_loader, device=device, history=mc_history)
 
                 train_history.save_to_mlflow()
                 train_history.save_to_pickle()
@@ -183,23 +170,24 @@ def main():
                 evaluation_history.save_to_mlflow()
                 evaluation_history.save_to_pickle()
 
-                evaluate_dataset_shifts(model=classifier, test_subjects=val_subjects, dataset=dataset,
-                                        device=device, use_age=use_age, monte_carlo=True, batch_size=batch_size)
-
                 # todo Check calibration metrics Brier and ECE
-                # todo Evaluate dataset shifts, performance and calibration
-                # todo Temperature scaling
-                # todo Check calibration metrics Brier and ECE
-                # todo Evaluate dataset shifts, performance and calibration
-                # todo Save history objects, create plots ++
-
-                # todo Test on greek eeg, mpi and tdbrain
+                classifiers.append(classifier)
 
             finally:
                 mlflow.end_run()
 
+        mlflow.start_run(run_name=f"weight_ensemble_FINAL_{str(run_id)}", nested=True)
+
+        # todo Load all trained models
+        # todo check calibration metrics and performance
+        # todo Evaluate dataset shifts
+        evaluate_dataset_shifts(model=classifiers, test_subjects=val_subjects, dataset=dataset,
+                                device=device, use_age=use_age, monte_carlo=True, batch_size=batch_size)
+        # todo Check OOD data
+
         # todo Create a figure for all
 
+        mlflow.end_run()
 
 if __name__ == "__main__":
     main()

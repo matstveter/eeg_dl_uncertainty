@@ -243,47 +243,22 @@ def process_eeg_file(sub_eeg, eeg_path, events, preprocess, nyquist, out_p):
     subject_id, _ = os.path.splitext(sub_eeg)
 
     start_time = events[subject_id]['start_time'] / raw_eeg_data.info['sfreq']
-    end_time = events[subject_id]['end_time'] / raw_eeg_data.info['sfreq']
+    if preprocess['use_end_time']:
+        end_time = events[subject_id]['end_time'] / raw_eeg_data.info['sfreq']
+    else:
+        end_time = start_time + preprocess['num_seconds_per_subject']
 
     # Check if the end_time is higher than the recording somehow...
     if end_time > raw_eeg_data.times[-1]:
         end_time = raw_eeg_data.times[-1]
 
     total_time = end_time - start_time
-    print(total_time)
 
     if total_time < preprocess['num_seconds_per_subject']:
         print(f"Data is too short, skipping")
         return
 
     raw_eeg_data.crop(tmin=start_time, tmax=end_time, verbose=False, include_tmax=False)
-
-    # # Use information from the event or use from the config file
-    # if events is not None:
-    #     print(subject_id)
-    #     try:
-    #         start = math.ceil(events[subject_id]['start'] / raw_eeg_data.info['sfreq'])
-    #     except KeyError:
-    #         print("Subject ID missing event_key, setting the start to start from config!")
-    #         start = start
-    # else:
-    #     # Starting at a time point
-    #     start = start
-    #
-    # end_time = events[subject_id]['end_time'] + start
-    #
-    # time_max = raw_eeg_data.times[-1]
-    # # Check that the recording is shorter or equal the end time
-    # if time_max >= end_time:
-    #     raw_eeg_data.crop(tmin=start, tmax=end_time, verbose=False, include_tmax=False)
-    # # Check if we can start the recording from an earlier position...
-    # elif time_max >= preprocess['num_seconds_per_subject']:
-    #     start = time_max - preprocess['num_seconds_per_subject']
-    #     # Check if we  start earlier in the recording
-    #     raw_eeg_data.crop(tmin=start, tmax=time_max, verbose=False, include_tmax=False)
-    # else:
-    #     print(f"Subject {sub_eeg} data is too short, skipping...")
-    #     return
 
     # Lowpass and high_pass filter the data
     raw_eeg_data.filter(l_freq=preprocess['low_freq'], h_freq=preprocess['high_freq'], verbose=False)
@@ -295,6 +270,9 @@ def process_eeg_file(sub_eeg, eeg_path, events, preprocess, nyquist, out_p):
                   f"sampling is done to {preprocess['high_freq'] * nyquist}")
         new_sampling_rate = preprocess['high_freq'] * nyquist  # Defaults to 3, as 2 is the absolute min
         raw_eeg_data.resample(new_sampling_rate, verbose=False)
+
+    if preprocess['rereference_avg']:
+        raw_eeg_data.set_eeg_reference('average', verbose=False)
 
     data = raw_eeg_data.get_data()
     save_path = os.path.join(out_p, f"{subject_id}.npy")
@@ -347,12 +325,11 @@ def create_eeg_dataset(conf_path: str):
 
     if isinstance(config, dict):
         if "tdbrain" in conf_path:
-            if "SAMPLE" in conf_path:
-                create_tdbrain_dataset(config=config, conf_path=conf_path)
-            else:
-                create_full_tdbrain_dataset(config=config, conf_path=conf_path)
+            create_tdbrain_dataset(config=config, conf_path=conf_path)
         elif "greek" in conf_path:
             create_greek_dataset(config=config, conf_path=conf_path)
+        elif "mpi" in conf_path:
+            create_MPI_dataset(config=config, conf_path=conf_path)
         else:
             # Now it's safe to pass config as it's confirmed to be a Dict
             process_eeg_data(config=config, conf_path=conf_path)
@@ -368,65 +345,6 @@ def get_cau_eeg_channels():
 
 
 def create_tdbrain_dataset(config, conf_path):
-    """ This function is used to generate EEGs with the same preprocessing steps as CAUEEG.
-
-    TDbrain article: https://www.nature.com/articles/s41597-022-01409-z
-
-    Parameters
-    ----------
-    config: dict
-        preprocessing steps, paths etc.
-    conf_path: path to config file
-
-    Returns
-    -------
-
-    """
-    if "eeg_data" in config['file_paths']:
-        eeg_path = config['file_paths']['eeg_data']
-    else:
-        raise ValueError("Please specify the path to the EEG files in the config file in the script folder. "
-                         "\nkey: 'eeg_data': path")
-
-    data_info = pd.read_csv(os.path.join(eeg_path, "participants.tsv"), sep='\t').to_dict()['participant_id']
-    outp_path = create_output_folder(base_path=config['file_paths']['output_directory'])
-    desired_channels = get_cau_eeg_channels()
-
-    ext = "ses-1/eeg/"
-
-    rename_dict = {
-        'T7': 'T3',
-        'T8': 'T4',
-        'P7': 'T5',
-        'P8': 'T6'
-    }
-    preprocess = config['preprocessing']
-
-    for sub in data_info.values():
-        eeg_file = os.path.join(eeg_path, sub, ext, f"{sub}_ses-1_task-restEC_eeg.vhdr")
-        raw = mne.io.read_raw_brainvision(vhdr_fname=eeg_file, preload=True, verbose=False)
-        raw.rename_channels(rename_dict, verbose=False)
-        raw.pick(desired_channels, verbose=False)
-
-        # preprocessing
-        raw.crop(tmin=30, tmax=90, verbose=False, include_tmax=False)
-
-        # Lowpass and high_pass filter the data
-        raw.filter(l_freq=preprocess['low_freq'], h_freq=preprocess['high_freq'], verbose=False)
-
-        # Set it to the same as CAUEGG
-        raw.resample(200, verbose=False)
-
-        data = raw.get_data()
-
-        save_path = os.path.join(outp_path, f"{sub}.npy")
-        np.save(save_path, data)
-        print(f"{sub}: Done")
-
-    shutil.copy(src=conf_path, dst=outp_path)
-
-
-def create_full_tdbrain_dataset(config, conf_path):
     """ This function is used to generate EEGs with the same preprocessing steps as CAUEEG.
 
     TDbrain article: https://www.nature.com/articles/s41597-022-01409-z
@@ -470,14 +388,22 @@ def create_full_tdbrain_dataset(config, conf_path):
         raw.rename_channels(rename_dict, verbose=False)
         raw.pick(desired_channels, verbose=False)
 
-        # preprocessing
-        raw.crop(tmin=30, tmax=90, verbose=False, include_tmax=False)
+        end_time = preprocess['start'] + preprocess['num_seconds_per_subject']
+
+        if end_time < raw.times[-1]:
+            # preprocessing
+            raw.crop(tmin=preprocess['start'],
+                     tmax=end_time,
+                     verbose=False, include_tmax=False)
+        else:
+            raw.crop(tmin=preprocess['start'],
+                     tmax=raw.times[-1],
+                     verbose=False, include_tmax=False)
 
         # Lowpass and high_pass filter the data
         raw.filter(l_freq=preprocess['low_freq'], h_freq=preprocess['high_freq'], verbose=False)
+        raw.resample(preprocess['sfreq'], verbose=False)
 
-        # Set it to the same as CAUEGG
-        raw.resample(200, verbose=False)
         raw.set_eeg_reference('average', verbose=False)
 
         data = raw.get_data()
@@ -512,13 +438,21 @@ def create_greek_dataset(config, conf_path):
         file_path = os.path.join(eeg_path, sub, "eeg", f"{sub}_task-eyesclosed_eeg.set")
         raw = mne.io.read_raw_eeglab(input_fname=file_path, verbose=False, preload=True)
         raw.pick(desired_channels, verbose=False)
-        raw.crop(tmin=30, tmax=90, verbose=False, include_tmax=False)
+
+        end_time = preprocess['start'] + preprocess['num_seconds_per_subject']
+        if end_time < raw.times[-1]:
+            # preprocessing
+            raw.crop(tmin=preprocess['start'],
+                     tmax=end_time,
+                     verbose=False, include_tmax=False)
+        else:
+            raw.crop(tmin=preprocess['start'],
+                     tmax=raw.times[-1],
+                     verbose=False, include_tmax=False)
 
         # Lowpass and high_pass filter the data
         raw.filter(l_freq=preprocess['low_freq'], h_freq=preprocess['high_freq'], verbose=False)
-
-        # Set it to the same as CAUEGG
-        raw.resample(200, verbose=False)
+        raw.resample(preprocess['sfreq'], verbose=False)
 
         raw.set_eeg_reference('average', verbose=False)
 
@@ -528,5 +462,66 @@ def create_greek_dataset(config, conf_path):
         np.save(save_path, data)
         print(f"{sub}: Done")
 
+    shutil.copy(src=conf_path, dst=outp_path)
+
+
+def create_MPI_dataset(config, conf_path):
+    if "eeg_data" in config['file_paths']:
+        eeg_path = config['file_paths']['eeg_data']
+    else:
+        raise ValueError("Please specify the path to the EEG files in the config file in the script folder. "
+                         "\nkey: 'eeg_data': path")
+
+    data_info = pd.read_csv(os.path.join(eeg_path, "participants.csv"), sep=',').to_dict()['ID']
+    outp_path = create_output_folder(base_path=config['file_paths']['output_directory'])
+    desired_channels = get_cau_eeg_channels()
+    rename_dict = {
+        'T7': 'T3',
+        'T8': 'T4',
+        'P7': 'T5',
+        'P8': 'T6'
+    }
+    preprocess = config['preprocessing']
+
+    print(os.listdir(eeg_path))
+
+    all_files = os.listdir(eeg_path)
+
+    for sub in data_info.values():
+        if sub in all_files:
+            eeg_file = os.path.join(eeg_path, sub, f"{sub}.set")
+            raw = mne.io.read_raw_eeglab(input_fname=eeg_file, preload=True, verbose=False)
+            try:
+                raw.rename_channels(rename_dict, verbose=False)
+                raw.pick(desired_channels, verbose=False)
+            except ValueError:
+                print(f"Skipping subject: {sub}")
+                continue
+
+            end_time = preprocess['start'] + preprocess['num_seconds_per_subject']
+
+            if end_time < raw.times[-1]:
+                # preprocessing
+                raw.crop(tmin=preprocess['start'],
+                         tmax=end_time,
+                         verbose=False, include_tmax=False)
+            else:
+                raw.crop(tmin=preprocess['start'],
+                         tmax=raw.times[-1],
+                         verbose=False, include_tmax=False)
+
+            # Lowpass and high_pass filter the data
+            raw.filter(l_freq=preprocess['low_freq'], h_freq=preprocess['high_freq'], verbose=False)
+            raw.resample(preprocess['sfreq'], verbose=False)
+            raw.plot(block=True)
+
+            raw.set_eeg_reference('average', verbose=False)
+            data = raw.get_data()
+
+            save_path = os.path.join(outp_path, f"{sub}.npy")
+            np.save(save_path, data)
+            print(f"Finished: {sub}")
+        else:
+            print(f"Missing participant: {sub}")
     shutil.copy(src=conf_path, dst=outp_path)
 

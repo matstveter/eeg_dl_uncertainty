@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.nn.modules.loss import _Loss
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from eegDlUncertainty.data.results.history import History, MCHistory
 from eegDlUncertainty.models.get_models import get_models
@@ -405,3 +406,61 @@ class MCClassifier(MainClassifier):
             history.calculate_metrics()
         else:
             return np.array(logits_per_pass), np.array(target_classes)
+
+
+class SnapshotClassifier(MainClassifier):
+    def fit_model(self, *, train_loader: DataLoader, val_loader: DataLoader, training_epochs: int,
+                  device: torch.device, loss_fn: _Loss, train_hist: History, val_history: History,
+                  earlystopping_patience: int):
+        best_loss = 1_000_000
+        epochs_per_cycle = 50
+        start_lr = 0.1
+
+        num_cycles = int(training_epochs / epochs_per_cycle)
+
+        optimizer = torch.optim.Adam(self.classifier.parameters(), lr=self._learning_rate)
+        self.to(device)
+        scheduler = CosineAnnealingLR(optimizer, T_max=epochs_per_cycle)
+
+        model_weight_paths = []
+
+        for cycle in range(num_cycles):
+            print(f"Cycle {cycle + 1}/{num_cycles}")
+
+            for epoch in range(epochs_per_cycle):
+                self.train()
+                for data, targets in train_loader:
+                    inputs, targets = data.to(device), targets.to(device)
+                    optimizer.zero_grad()
+                    outputs = self(inputs)
+                    loss = loss_fn(outputs, targets)
+
+                    # todo Store values in a history object?
+
+                    loss.backward()
+                    optimizer.step()
+
+                scheduler.step()
+                print(f"\n--- CYCLE: {cycle + 1} / {num_cycles} EPOCH {epoch + 1} / {epochs_per_cycle} --- LR: "
+                      f"{scheduler.get_last_lr()[0]}")
+            
+            self.eval()
+            with torch.no_grad():
+                for inputs, targets in val_loader:
+                    inputs, targets = inputs.to(device), targets.to(device)
+                    outputs = self(inputs)
+
+                    val_loss = loss_fn(outputs, targets)
+
+                    # Activation function and store values
+                    y_pred = self.activation_function(logits=outputs)
+
+                    # todo Save val history to object?
+            
+            # todo Save weights of the model
+            path = os.path.join(self._model_path, f"snapshot_{cycle}")
+            self.classifier.save(path=path)
+
+            # save the abs path to the models making it easier to load it later...
+            model_weight_paths.append(path)
+            
