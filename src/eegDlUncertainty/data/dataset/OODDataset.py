@@ -87,7 +87,7 @@ class BaseDataset(abc.ABC):
         return data
 
     def load_targets(self):
-        """ This function loads the target class from the label dictionary, and repaeats the calss labels num_epochs
+        """ This function loads the target class from the label dictionary, and repeats the class labels num_epochs
         times. It will be the same if num_epochs is 1.
 
         Returns

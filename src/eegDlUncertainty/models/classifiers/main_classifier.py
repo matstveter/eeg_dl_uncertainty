@@ -319,6 +319,35 @@ class MainClassifier(abc.ABC, nn.Module):
         print(f"Optimal temperature {model_name}", self.temperature.item())
 
     def _get_predictions(self, loader, device):
+        """
+        Get predictions from the model for the given data loader.
+
+        This method applies the model to the data from the loader and collects the predictions
+        and ground truth labels. The model is set to evaluation mode and computations are performed
+        without gradient tracking.
+
+        Parameters
+        ----------
+        loader : DataLoader
+            The DataLoader providing the data for prediction. It should yield batches of
+            data and corresponding labels.
+        device : torch.device
+            The device to which the data should be transferred. This is typically
+            a CUDA device or CPU.
+
+        Returns
+        -------
+        tuple of np.array
+            A tuple containing two numpy arrays. The first array contains the model's
+            predictions for each input sample. The second array contains the ground truth
+            labels for each input sample.
+
+        Notes
+        -----
+        The method moves the data to the specified device before applying the model.
+        The model's predictions are obtained by calling the `predict_prob` method.
+        The predictions and labels are collected in lists, which are then converted to numpy arrays.
+        """
         self.eval()
         preds, ground_truth = [], []
         with torch.no_grad():
@@ -435,7 +464,8 @@ class SnapshotClassifier(MainClassifier):
                     outputs = self(inputs)
                     loss = loss_fn(outputs, targets)
 
-                    # todo Store values in a history object?
+                    y_pred = self.activation_function(logits=outputs)
+                    train_hist.batch_stats(y_pred=y_pred, y_true=targets, loss=loss)
 
                     loss.backward()
                     optimizer.step()
@@ -454,13 +484,13 @@ class SnapshotClassifier(MainClassifier):
 
                     # Activation function and store values
                     y_pred = self.activation_function(logits=outputs)
+                    val_history.batch_stats(y_pred=y_pred, y_true=targets, loss=val_loss)
+                val_history.on_epoch_end()
 
-                    # todo Save val history to object?
-            
-            # todo Save weights of the model
             path = os.path.join(self._model_path, f"snapshot_{cycle}")
             self.classifier.save(path=path)
 
             # save the abs path to the models making it easier to load it later...
             model_weight_paths.append(path)
-            
+
+        return model_weight_paths
