@@ -1,4 +1,8 @@
 import matplotlib
+
+from eegDlUncertainty.data.results.ood_exp import ood_experiment
+from eegDlUncertainty.data.results.uncertainty import calculate_metrics_for_ensemble
+
 matplotlib.use("TkAgg")
 import argparse
 import os
@@ -141,9 +145,11 @@ def main():
             train_history, val_history = get_history_objects(train_loader=train_loader, val_loader=val_loader,
                                                              save_path=save_path, num_classes=dataset.num_classes)
             try:
-                classifier.fit_model(train_loader=train_loader, training_epochs=train_epochs, device=device,
-                                     loss_fn=criterion, earlystopping_patience=earlystopping,
-                                     val_loader=val_loader, train_hist=train_history, val_history=val_history)
+                model_weight_list = classifier.fit_model(train_loader=train_loader, training_epochs=train_epochs,
+                                                         device=device, loss_fn=criterion,
+                                                         earlystopping_patience=earlystopping,
+                                                         val_loader=val_loader, train_hist=train_history,
+                                                         val_history=val_history)
             except torch.cuda.OutOfMemoryError as e:
                 mlflow.set_tag("Exception", "CUDA Out of Memory Error")
                 mlflow.log_param("Exception Message", str(e))
@@ -151,44 +157,45 @@ def main():
                 print(f"Cuda Out Of Memory -> Cleanup -> Error message: {e}")
                 break
             else:
-                mc_history = MCHistory(num_classes=dataset.num_classes, save_path=run_path)
-
-                if use_test_set:
-                    evaluation_history = History(num_classes=dataset.num_classes, set_name="test",
-                                                 loader_lenght=len(test_loader), save_path=run_path)
-                    classifier.test_model(test_loader=test_loader, device=device, test_hist=evaluation_history,
-                                          loss_fn=criterion)
-                    classifier.get_mc_predictions(test_loader=test_loader, device=device, history=mc_history)
-                else:
-                    evaluation_history = History(num_classes=dataset.num_classes, set_name="test_val",
-                                                 loader_lenght=len(val_loader), save_path=run_path)
-                    classifier.test_model(test_loader=val_loader, device=device, test_hist=evaluation_history,
-                                          loss_fn=criterion)
-                    classifier.get_mc_predictions(test_loader=val_loader, device=device, history=mc_history)
-
+                # Save the training and validation history
                 train_history.save_to_mlflow()
                 train_history.save_to_pickle()
                 val_history.save_to_mlflow()
                 val_history.save_to_pickle()
-                evaluation_history.save_to_mlflow()
-                evaluation_history.save_to_pickle()
 
-                evaluate_dataset_shifts(model=classifier, test_subjects=val_subjects, dataset=dataset,
-                                        device=device, use_age=use_age, monte_carlo=True, batch_size=batch_size)
+                classifiers = []
 
-                # todo Check calibration metrics Brier and ECE
-                # todo Evaluate dataset shifts, performance and calibration
-                # todo Temperature scaling
-                # todo Check calibration metrics Brier and ECE
-                # todo Evaluate dataset shifts, performance and calibration
-                # todo Save history objects, create plots ++
+                # Load all the models from the weigh lists
+                for m_weights in model_weight_list:
+                    classifiers.append(SnapshotClassifier(model_name=model_name, pretrained=m_weights,
+                                                          **hyperparameters))
 
-                # todo Test on greek eeg, mpi and tdbrain
+                # For each classifier, test the model and save the history
+                for i, cl in enumerate(classifiers):
+                    print(f"Testing classifier {i+1} of {len(classifiers)}. ")
+                    if use_test_set:
+                        evaluation_history = History(num_classes=dataset.num_classes, set_name=f"test_{i}",
+                                                     loader_lenght=len(test_loader), save_path=run_path)
+                        cl.test_model(test_loader=test_loader, device=device, test_hist=evaluation_history,
+                                      loss_fn=criterion)
+                    else:
+                        evaluation_history = History(num_classes=dataset.num_classes, set_name=f"test_val_{i}",
+                                                     loader_lenght=len(val_loader), save_path=run_path)
+                        cl.test_model(test_loader=val_loader, device=device, test_hist=evaluation_history,
+                                      loss_fn=criterion)
+                    evaluation_history.save_to_mlflow()
+                    evaluation_history.save_to_pickle()
 
             finally:
                 mlflow.end_run()
 
-        # todo Create a figure for all
+            datashift_results = evaluate_dataset_shifts(model=classifiers, test_subjects=val_subjects, dataset=dataset,
+                                                        device=device, use_age=use_age, batch_size=batch_size,
+                                                        save_path=experiment_path)
+            ood_results = ood_experiment(classifiers, dataset_version=dataset_version, num_seconds=num_seconds,
+                                         age_scaling=age_scaling, device=device, batch_size=batch_size,
+                                         save_path=experiment_path)
+
 
 
 if __name__ == "__main__":

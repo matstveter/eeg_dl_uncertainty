@@ -14,7 +14,9 @@ from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
 from eegDlUncertainty.data.dataset.OODDataset import GreekEEGDataset, TDBrainDataset
 from eegDlUncertainty.data.results.dataset_shifts import evaluate_dataset_shifts
 from eegDlUncertainty.data.results.history import History, MCHistory, get_history_objects
+from eegDlUncertainty.data.results.ood_exp import ood_experiment
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information
+from eegDlUncertainty.data.utils import save_dict_to_pickle
 from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \
     prepare_experiment_environment, \
     setup_experiment_path
@@ -141,9 +143,9 @@ def main():
             train_history, val_history = get_history_objects(train_loader=train_loader, val_loader=val_loader,
                                                              save_path=save_path, num_classes=dataset.num_classes)
             try:
-                classifier.fit_model(train_loader=train_loader, training_epochs=train_epochs, device=device,
-                                     loss_fn=criterion, earlystopping_patience=earlystopping,
-                                     val_loader=val_loader, train_hist=train_history, val_history=val_history)
+                _ = classifier.fit_model(train_loader=train_loader, training_epochs=train_epochs, device=device,
+                                         loss_fn=criterion, earlystopping_patience=earlystopping,
+                                         val_loader=val_loader, train_hist=train_history, val_history=val_history)
             except torch.cuda.OutOfMemoryError as e:
                 mlflow.set_tag("Exception", "CUDA Out of Memory Error")
                 mlflow.log_param("Exception Message", str(e))
@@ -170,24 +172,20 @@ def main():
                 evaluation_history.save_to_mlflow()
                 evaluation_history.save_to_pickle()
 
-                # todo Check calibration metrics Brier and ECE
                 classifiers.append(classifier)
 
             finally:
                 mlflow.end_run()
 
-        mlflow.start_run(run_name=f"weight_ensemble_FINAL_{str(run_id)}", nested=True)
+        datashift_results = evaluate_dataset_shifts(model=classifiers, test_subjects=val_subjects, dataset=dataset,
+                                                    device=device, use_age=use_age, batch_size=batch_size,
+                                                    save_path=experiment_path)
+        ood_results = ood_experiment(classifiers, dataset_version=dataset_version, num_seconds=num_seconds,
+                                     age_scaling=age_scaling, device=device, batch_size=batch_size,
+                                     save_path=experiment_path)
 
-        # todo Load all trained models
-        # todo check calibration metrics and performance
-        # todo Evaluate dataset shifts
-        evaluate_dataset_shifts(model=classifiers, test_subjects=val_subjects, dataset=dataset,
-                                device=device, use_age=use_age, monte_carlo=True, batch_size=batch_size)
-        # todo Check OOD data
+        # todo What to do with plots???
 
-        # todo Create a figure for all
-
-        mlflow.end_run()
 
 if __name__ == "__main__":
     main()
