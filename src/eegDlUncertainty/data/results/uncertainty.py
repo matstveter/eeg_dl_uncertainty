@@ -135,6 +135,26 @@ def compute_classwise_predictive_entropy(mean_probs, targets):
 
 
 def compute_classwise_variance(all_probs, targets):
+    """
+    Compute the variance of the probabilities for each class.
+
+    This function calculates the variance of the predicted probabilities for each class.
+    The variance is calculated separately for each class, and the mean variance for each class is returned.
+
+    Parameters
+    ----------
+    all_probs : array_like
+        The predicted probabilities for each class. This should be a 2D array where the first dimension
+        corresponds to the samples and the second dimension corresponds to the classes.
+    targets : array_like
+        The true class labels for each sample. This should be a 1D array.
+
+    Returns
+    -------
+    dict
+        A dictionary where the keys are the class labels (0, 1, 2) and the values are the mean variance
+        of the predicted probabilities for that class.
+    """
     variance = np.var(all_probs, axis=0)
 
     class_wise_variance = {0: [], 1: [], 2: []}
