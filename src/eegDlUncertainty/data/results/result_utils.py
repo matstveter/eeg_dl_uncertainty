@@ -18,14 +18,3 @@ def write_metrics_to_file(metrics_majority_vote, metrics_final_classes, file_pat
         for metric, value in metrics_final_classes.items():
             f.write(f"{metric}: {value}\n")
 
-
-def calculate_metrics(y_true, y_pred, average='macro'):
-    """Calculate and return performance metrics."""
-    metrics = {
-        'accuracy': accuracy_score(y_true, y_pred),
-        'precision': precision_score(y_true, y_pred, average=average, zero_division=0),
-        'recall': recall_score(y_true, y_pred, average=average, zero_division=0),
-        'f1_score': f1_score(y_true, y_pred, average=average, zero_division=0),
-    }
-    return metrics
-
