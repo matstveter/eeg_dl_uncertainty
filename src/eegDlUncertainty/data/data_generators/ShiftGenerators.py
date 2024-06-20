@@ -13,7 +13,7 @@ from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
 
 class EEGDatashiftGenerator(Dataset):
     def __init__(self, subjects: Tuple[str, ...], dataset: CauEEGDataset, use_age: bool, shift_intensity, shift_type,
-                 device: Optional[torch.device] = None):
+                 device: Optional[torch.device] = None, scalar_multi: Optional[float] = 0.5):
         super().__init__()
         self._use_age = use_age
         self._shift_type = shift_type
@@ -34,21 +34,23 @@ class EEGDatashiftGenerator(Dataset):
         else:
             shifted_eeg = inputs
 
+        self._scalar_multi = scalar_multi
         self._x = torch.tensor(shifted_eeg, dtype=torch.float32)
         self._y = torch.tensor(targets, dtype=torch.float32)
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device is None else device
 
     def apply_shift(self, data, targets):
-        if self._shift_type == "class_combination_spatial":
-            return self._combine_eeg(data=data, targets=targets, spatial=True)
-        elif self._shift_type == "class_combination_temporal":
+        if self._shift_type == "class_combination_temporal":
             return self._combine_eeg(data=data, targets=targets, spatial=False)
-        elif self._shift_type in ("timereverse", "signflip", "gaussian_channel", "alpha_bandpass", "beta_bandpass",
+        elif self._shift_type in ("gaussian_channel", "phase_shift_channel", "scalar_modulation_channel",
+                                  "alpha_bandpass", "beta_bandpass",
                                   "theta_bandpass", "delta_bandpass", "gamma_bandpass", "hbeta_bandpass",
                                   "lbeta_bandpass"):
             return self._channel_augmentations(data)
         elif self._shift_type == "interpolate":
             return self._interpolate_augment(data=data)
+        elif self._shift_type == "scalar_modulation":
+            return self._scalar_modulation(data=data)
         elif self._shift_type == "gaussian":
             return self._gaussian(data=data)
         else:
@@ -234,13 +236,17 @@ class EEGDatashiftGenerator(Dataset):
             for j, ch in enumerate(sub):
                 # If the current channel is in the list of channels that should be reversed
                 if j in cur_channel_to_augment:
-                    if self._shift_type == "timereverse":
-                        new_arr = np.flip(ch, axis=0)
-                    elif self._shift_type == "signflip":
-                        new_arr = ch * -1
-                    elif self._shift_type == "gaussian_channel":
+                    if self._shift_type == "gaussian_channel":
                         noise = np.random.normal(0, 0.1, ch.shape)
                         new_arr = ch + noise
+                    elif self._shift_type == "phase_shift_channel":
+                        # Plot difference after shift
+                        plt.plot(ch)
+                        plt.plot(self._phase_shift_data(ch, np.pi/2))
+                        plt.show()
+                        new_arr = self._phase_shift_data(ch, np.pi/2)
+                    elif self._shift_type == "scalar_modulation_channel":
+                        new_arr = ch * self._scalar_multi
                     elif self._shift_type in ("theta_bandpass", "alpha_bandpass", "beta_bandpass", "delta_bandpass",
                                               "hbeta_bandpass", "lbeta_bandpass", "gamma_bandpass"):
                         eeg_data = np.copy(ch)
@@ -341,6 +347,78 @@ class EEGDatashiftGenerator(Dataset):
             return 30, 50
         else:
             raise ValueError(f"Frequency band: {freq} is not recognized")
+
+    def _scalar_modulation(self, data):
+        """
+        Perform scalar modulation on the given EEG data.
+
+        This function takes a 2D array of EEG data and multiplies each data point by a shift intensity factor.
+        The shift intensity is a class attribute representing the factor by which the data will be multiplied.
+
+        Parameters
+        ----------
+        data : array_like
+            The input EEG data to be modulated. This should be a 1D array.
+
+        Returns
+        -------
+        array_like
+            The modulated EEG data. This is a 1D array of the same size as the input data.
+
+        Notes
+        -----
+        The function starts by creating a new numpy array, `altered_array`, which has the same shape as the input data.
+        This array is initialized with zeros and will be used to store the modulated data.
+
+        The function then loops over the input data. For each subject's data (referred to as `sub` in the code),
+        it multiplies the data by the shift intensity and stores the result in the corresponding position in `altered_array`.
+        """
+        altered_array = np.zeros_like(data)
+
+        print(f"Scalar modulation with intensity: {self._shift_intensity}")
+        for i, sub in enumerate(data):
+            altered_array[i] = sub * self._shift_intensity
+
+        return altered_array
+
+    @staticmethod
+    def _phase_shift_data(data, phi):
+        """
+        Perform a phase shift on the given data.
+
+        This function takes a 1D array of data and a phase shift value in radians,
+        performs a Fourier Transform to move to the frequency domain, applies the phase shift,
+        and then performs an Inverse Fourier Transform to move back to the time domain.
+
+        Parameters
+        ----------
+        data : array_like
+            The input data to be phase shifted. This should be a 1D array.
+        phi : float
+            The phase shift to apply, in radians.
+
+        Returns
+        -------
+        array_like
+            The phase-shifted data. This is a 1D array of the same size as the input data.
+
+        Notes
+        -----
+        The phase shift is performed by multiplying the Fourier Transform of the data by `e^(i*phi)`.
+        The result is then transformed back to the time domain using the Inverse Fourier Transform.
+        Only the real part of the result is returned, as the imaginary part should be zero (or close to zero
+        due to numerical precision issues) after the Inverse Fourier Transform.
+        """
+        # Fourier Transform
+        transformed = np.fft.fft(data)
+
+        # Phase Shift
+        shifted = transformed * np.exp(1j * phi)
+
+        # Inverse Fourier Transform
+        result = np.fft.ifft(shifted)
+
+        return np.real(result)  # return only the real part
 
     @property
     def x(self) -> torch.Tensor:
