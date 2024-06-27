@@ -1,13 +1,11 @@
 import matplotlib
 
 from eegDlUncertainty.data.results.ood_exp import ood_experiment
-from eegDlUncertainty.data.results.uncertainty import calculate_metrics_for_ensemble
 
 matplotlib.use("TkAgg")
 import argparse
 import os
 import random
-import sys
 from typing import List, Optional, Union
 import mlflow
 import numpy
@@ -18,17 +16,18 @@ from torch.utils.data import DataLoader
 from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
 from eegDlUncertainty.data.data_generators.augmentations import get_augmentations
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
-from eegDlUncertainty.data.dataset.OODDataset import GreekEEGDataset, MPILemonDataset, TDBrainDataset
 from eegDlUncertainty.data.results.dataset_shifts import evaluate_dataset_shifts
-from eegDlUncertainty.data.results.history import History, MCHistory, get_history_objects
+from eegDlUncertainty.data.results.history import History, get_history_objects
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information
 from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \
     prepare_experiment_environment, \
     setup_experiment_path
-from eegDlUncertainty.models.classifiers.main_classifier import MCClassifier, SnapshotClassifier
+from eegDlUncertainty.models.classifiers.main_classifier import SnapshotClassifier
 
+from eegDlUncertainty.data.dataset.OODDataset import GreekEEGDataset, MPILemonDataset, TDBrainDataset
 
 def main():
+    experiment = "snapshot_ensemble"
     #########################################################################################################
     # Get arguments and read config file
     #########################################################################################################
@@ -80,8 +79,8 @@ def main():
 
     experiment_path, folder_name = setup_experiment_path(save_path=save_path,
                                                          config_path=config_path,
-                                                         model_name=model_name)
-    experiment_name = "Snapshot_experiments"
+                                                         experiment=experiment)
+    experiment_name = f"{experiment}_experiments"
     prepare_experiment_environment(experiment_name=experiment_name)
     #########################################################################################################
     # Dataset
@@ -131,7 +130,7 @@ def main():
         num_runs = 1
 
         for run_id in range(num_runs):
-            mlflow.start_run(run_name=f"snapshot_{str(run_id)}", nested=True)
+            mlflow.start_run(run_name=f"{experiment}_{str(run_id)}", nested=True)
             run_path = create_run_folder(path=experiment_path, index=str(run_id))
             hyperparameters = {"in_channels": dataset.num_channels,
                                "num_classes": dataset.num_classes,

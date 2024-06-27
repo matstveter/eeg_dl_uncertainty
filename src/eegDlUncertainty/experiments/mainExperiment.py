@@ -1,26 +1,21 @@
 import os
+import random
 import shutil
 from abc import ABC, abstractmethod
 from datetime import datetime
-import random
 from typing import List, Optional, Union
 
-import numpy
-
-import torch
 import mlflow
+import numpy
+import torch
 from braindecode.augmentation import AugmentedDataLoader
 from torch.utils.data import DataLoader
 
 from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
 from eegDlUncertainty.data.data_generators.augmentations import get_augmentations
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
-from eegDlUncertainty.data.dataset.misc_classes import verify_split_subjects
-from eegDlUncertainty.data.results.history import History, MCHistory, get_history_object
-from eegDlUncertainty.data.results.plotter import Plotter
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information, get_experiment_name
-from eegDlUncertainty.models.classifiers.main_classifier import MCClassifier, MainClassifier
-from eegDlUncertainty.models.classifiers.swag_classifier import SWAClassifier, SWAGClassifier
+from eegDlUncertainty.models.classifiers.swag_classifier import SWAClassifier
 
 
 class BaseExperiment(ABC):

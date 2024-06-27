@@ -533,11 +533,7 @@ class CauEEGDataset:
 
     @staticmethod
     def __normalize_data(x):
-        """
-        Normalize the data to the range [-1, 1].
-        If method is 'channel', normalization is done channel-wise.
-        If method is 'subject', normalization is done across all channels for the subject.
-        """
+
         x = (x - np.mean(x, axis=-1, keepdims=True)) / (np.std(x, axis=-1, keepdims=True) + 1e-8)
         return x
 

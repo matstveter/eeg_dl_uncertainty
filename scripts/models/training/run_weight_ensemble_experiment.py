@@ -24,6 +24,7 @@ from eegDlUncertainty.models.classifiers.main_classifier import MCClassifier, Ma
 
 
 def main():
+    experiment = "weight_ensemble"
     #########################################################################################################
     # Get arguments and read config file
     #########################################################################################################
@@ -75,8 +76,8 @@ def main():
 
     experiment_path, folder_name = setup_experiment_path(save_path=save_path,
                                                          config_path=config_path,
-                                                         model_name=model_name)
-    experiment_name = "WE_experiments"
+                                                         experiment=experiment)
+    experiment_name = f"{experiment}_experiments"
     prepare_experiment_environment(experiment_name=experiment_name)
     #########################################################################################################
     # Dataset
@@ -123,13 +124,14 @@ def main():
 
     with mlflow.start_run(run_name=folder_name):
         # Setup MLFLOW experiment
-        seeds = [0, 1, 42, 123, 456, 789]
+        # seeds = [0, 1, 42, 123, 456, 789]
+        seeds = [0, 1]
         classifiers = []
 
         for run_id in range(len(seeds)):
             torch.manual_seed(seeds[run_id])
 
-            mlflow.start_run(run_name=f"weight_ensemble_{str(run_id)}", nested=True)
+            mlflow.start_run(run_name=f"{experiment}_{str(run_id)}", nested=True)
             run_path = create_run_folder(path=experiment_path, index=str(run_id))
             hyperparameters = {"in_channels": dataset.num_channels,
                                "num_classes": dataset.num_classes,
@@ -180,9 +182,9 @@ def main():
         datashift_results = evaluate_dataset_shifts(model=classifiers, test_subjects=val_subjects, dataset=dataset,
                                                     device=device, use_age=use_age, batch_size=batch_size,
                                                     save_path=experiment_path)
-        ood_results = ood_experiment(classifiers, dataset_version=dataset_version, num_seconds=num_seconds,
-                                     age_scaling=age_scaling, device=device, batch_size=batch_size,
-                                     save_path=experiment_path)
+        # ood_results = ood_experiment(classifiers, dataset_version=dataset_version, num_seconds=num_seconds,
+        #                              age_scaling=age_scaling, device=device, batch_size=batch_size,
+        #                              save_path=experiment_path)
 
         # todo What to do with plots???
 

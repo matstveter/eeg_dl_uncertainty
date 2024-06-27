@@ -56,7 +56,7 @@ def main():
     
     experiment_path, folder_name = setup_experiment_path(save_path=save_path,
                                                          config_path=config_path,
-                                                         model_name=model_name)
+                                                         experiment=model_name)
     experiment_name = "Dataset_search"
     prepare_experiment_environment(experiment_name=experiment_name)
 

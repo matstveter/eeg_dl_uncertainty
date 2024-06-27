@@ -154,7 +154,7 @@ def get_parameters_from_config(config_path):
     return param
 
 
-def setup_experiment_path(save_path, model_name, config_path):
+def setup_experiment_path(save_path, experiment, config_path):
     """
     Sets up and returns the directory path for saving experiment files.
 
@@ -178,7 +178,7 @@ def setup_experiment_path(save_path, model_name, config_path):
     - This method does not handle errors that might occur during directory creation or file copying, so additional
       error handling may be necessary depending on the application's requirements.
     """
-    folder_name = f"{model_name}_{datetime.now().strftime('%Y-%m-%d %H_%M_%S')}" 
+    folder_name = f"{experiment}_{datetime.now().strftime('%Y-%m-%d %H_%M_%S')}"
     paths = os.path.join(save_path, folder_name)
     os.makedirs(paths, exist_ok=True)
     shutil.copy(src=os.path.join(os.path.dirname(__file__), "config_files", config_path),

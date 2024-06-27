@@ -318,7 +318,7 @@ class MainClassifier(abc.ABC, nn.Module):
         mlflow.log_metric(f"Optimal temperature {model_name}", self.temperature.item())
         print(f"Optimal temperature {model_name}", self.temperature.item())
 
-    def _get_predictions(self, loader, device):
+    def get_predictions(self, loader, device, get_prob=False):
         """
         Get predictions from the model for the given data loader.
 
@@ -353,7 +353,10 @@ class MainClassifier(abc.ABC, nn.Module):
         with torch.no_grad():
             for inp, lab in loader:
                 inputs, label = inp.to(device), lab.to(device)
-                outputs = self.predict_prob(inputs)
+                if get_prob:
+                    outputs = self.predict_prob(inputs)
+                else:
+                    outputs = self(inputs)
                 preds.extend(outputs.cpu().numpy())
                 ground_truth.extend(label.cpu().numpy())
         return np.array(preds), np.array(ground_truth)

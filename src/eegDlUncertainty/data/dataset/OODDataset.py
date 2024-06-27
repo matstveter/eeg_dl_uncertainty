@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy
 import numpy as np
 import pandas as pd
+import torch
 
 from eegDlUncertainty.data.dataset.misc_classes import AgeScaler
 
@@ -53,6 +54,7 @@ class BaseDataset(abc.ABC):
         # This function checks the labels, checks subjects and transforms the self._labels to a dict with only needed
         # info
         self.prepare_dataset()
+        self._set_age_scaler()
 
     @property
     def subjects(self):
@@ -98,6 +100,8 @@ class BaseDataset(abc.ABC):
 
         class_labels = np.array([self._labels[sub]['class_label'] for sub in self._subjects])
         class_labels = np.repeat(class_labels, self._num_epochs)
+        class_labels: numpy.ndarray = torch.nn.functional.one_hot(torch.from_numpy(class_labels), num_classes=3).numpy()
+        print(class_labels)
         return class_labels
 
     def load_ages(self, add_noise=False):

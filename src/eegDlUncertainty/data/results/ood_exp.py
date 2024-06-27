@@ -4,6 +4,7 @@ from torch.utils.data import DataLoader
 
 from eegDlUncertainty.data.data_generators.CauDataGenerator import OODDataGenerator
 from eegDlUncertainty.data.dataset.OODDataset import GreekEEGDataset, MPILemonDataset, TDBrainDataset
+from eegDlUncertainty.data.results.dataset_shifts import activation_function
 from eegDlUncertainty.data.results.uncertainty import calculate_performance_metrics, compute_classwise_uncertainty, \
     get_uncertainty_metrics
 from eegDlUncertainty.data.utils import save_dict_to_pickle
@@ -72,14 +73,14 @@ def single_dataset_experiment(model, data_loader, device):
         print("Testing with the ensemble")
         logits = []
         for m in model:
-            ensemble_logits, targets = m.get_predictions(test_loader=data_loader, device=device)
+            ensemble_logits, targets = m.get_predictions(loader=data_loader, device=device)
             logits.append(ensemble_logits)
         logits = np.array(logits)  # shape: (num_models, num_samples, num_classes)
 
     mean_logits = torch.from_numpy(np.mean(logits, axis=0))
-    all_predictions = torch.softmax(torch.from_numpy(logits), dim=2).numpy()
-    probs = model.activation_function(logits=mean_logits).cpu().detach().numpy()
-    predictions = model.activation_function(logits=mean_logits, ret_prob=False).cpu().detach().numpy()
+    all_predictions = activation_function(logits=torch.from_numpy(logits), ensemble=True)
+    probs = activation_function(logits=mean_logits, ensemble=False)
+    predictions = activation_function(logits=mean_logits, ensemble=False, ret_prob=False)
     target_classes = np.argmax(targets, axis=1)
 
     ood_predictions = {"mean_logits": mean_logits,
@@ -111,8 +112,11 @@ def ood_experiment(classifiers, dataset_version: int, num_seconds: int, age_scal
                                                            age_scaling=age_scaling)
 
     greek_res, greek_pred = single_dataset_experiment(model=classifiers, data_loader=greek_loader, device=device)
+    print("Greek results: ", greek_res)
     mpi_res, mpi_pred = single_dataset_experiment(model=classifiers, data_loader=mpi_loader, device=device)
+    print("MPI results: ", mpi_res)
     tdbrain_res, tdbrain_pred = single_dataset_experiment(model=classifiers, data_loader=tdbrain_loader, device=device)
+    print("TDBrain results: ", tdbrain_res)
 
     combined_results = {'greek': {'results': greek_res, 'predictions': greek_pred},
                         'mpi': {'results': mpi_res, 'predictions': mpi_pred},

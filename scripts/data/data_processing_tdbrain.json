@@ -1,6 +1,6 @@
 {
   "preprocessing": {
-    "low_freq": 1.0,
+    "low_freq": 2.0,
     "high_freq": 45,
     "num_seconds_per_subject": 60,
     "sfreq": 200,

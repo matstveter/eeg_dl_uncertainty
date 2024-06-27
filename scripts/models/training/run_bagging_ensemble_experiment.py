@@ -24,6 +24,7 @@ from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
 
 
 def main():
+    experiment = "bagging_ensemble"
     #########################################################################################################
     # Get arguments and read config file
     #########################################################################################################
@@ -79,8 +80,8 @@ def main():
 
     experiment_path, folder_name = setup_experiment_path(save_path=save_path,
                                                          config_path=config_path,
-                                                         model_name=model_name)
-    experiment_name = "BE_experiments"
+                                                         experiment=experiment)
+    experiment_name = f"{experiment}_experiments"
     prepare_experiment_environment(experiment_name=experiment_name)
     #########################################################################################################
     # Dataset
@@ -138,7 +139,7 @@ def main():
 
             # todo Consider making the models a bit simpler as the dataset is smaller
 
-            mlflow.start_run(run_name=f"bagging_ensemble_{str(run_id)}", nested=True)
+            mlflow.start_run(run_name=f"{experiment}_{str(run_id)}", nested=True)
             run_path = create_run_folder(path=experiment_path, index=str(run_id))
             hyperparameters = {"in_channels": dataset.num_channels,
                                "num_classes": dataset.num_classes,

@@ -25,6 +25,7 @@ from eegDlUncertainty.models.classifiers.main_classifier import MCClassifier
 
 
 def main():
+    experiement = "MCD_ensemble"
     #########################################################################################################
     # Get arguments and read config file
     #########################################################################################################
@@ -76,8 +77,8 @@ def main():
 
     experiment_path, folder_name = setup_experiment_path(save_path=save_path,
                                                          config_path=config_path,
-                                                         model_name=model_name)
-    experiment_name = "MCD_experiments"
+                                                         experiment=experiement)
+    experiment_name = f"{experiement}_experiments"
     prepare_experiment_environment(experiment_name=experiment_name)
     #########################################################################################################
     # Dataset
@@ -85,16 +86,6 @@ def main():
     dataset = CauEEGDataset(dataset_version=dataset_version, targets=prediction, eeg_len_seconds=num_seconds,
                             epochs=eeg_epochs, overlapping_epochs=overlapping_epochs, age_scaling=age_scaling)
     train_subjects, val_subjects, test_subjects = dataset.get_splits()
-
-    # # test = TDBrainDataset(dataset_version=dataset_version, num_seconds_eeg=num_seconds, age_scaling=age_scaling)
-    # test = GreekEEGDataset(dataset_version=dataset_version, num_seconds_eeg=num_seconds, age_scaling=age_scaling)
-    # test.load_targets()
-    # test = TDBrainDataset(dataset_version=dataset_version, num_seconds_eeg=num_seconds, age_scaling=age_scaling)
-    # test.load_targets()
-    test = MPILemonDataset(dataset_version=dataset_version, num_seconds_eeg=num_seconds, age_scaling=age_scaling)
-    test.load_targets()
-
-    sys.exit()
 
     if "test" in config_path:
         train_subjects = train_subjects[0:100]
@@ -137,7 +128,7 @@ def main():
         num_runs = 1
 
         for run_id in range(num_runs):
-            mlflow.start_run(run_name=f"mcd_run_{str(run_id)}", nested=True)
+            mlflow.start_run(run_name=f"{experiement}_run_{str(run_id)}", nested=True)
             run_path = create_run_folder(path=experiment_path, index=str(run_id))
             hyperparameters = {"in_channels": dataset.num_channels,
                                "num_classes": dataset.num_classes,

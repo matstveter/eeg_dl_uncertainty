@@ -483,8 +483,6 @@ def create_MPI_dataset(config, conf_path):
     }
     preprocess = config['preprocessing']
 
-    print(os.listdir(eeg_path))
-
     all_files = os.listdir(eeg_path)
 
     for sub in data_info.values():
@@ -513,7 +511,6 @@ def create_MPI_dataset(config, conf_path):
             # Lowpass and high_pass filter the data
             raw.filter(l_freq=preprocess['low_freq'], h_freq=preprocess['high_freq'], verbose=False)
             raw.resample(preprocess['sfreq'], verbose=False)
-            raw.plot(block=True)
 
             raw.set_eeg_reference('average', verbose=False)
             data = raw.get_data()

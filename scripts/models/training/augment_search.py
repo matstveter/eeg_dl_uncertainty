@@ -21,7 +21,7 @@ from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
 
 
 def generate_data_hyperparameters():
-    possible_augmentations = ['gaussiannoise', 'timereverse', 'signflip', 'ftsurrogate', 'channelsshuffle',
+    possible_augmentations = ['timereverse', 'signflip', 'ftsurrogate', 'channelsshuffle',
                               'channelsdropout', 'smoothtimemask', 'bandstopfilter']
 
     for r in range(1, len(possible_augmentations) + 1):
@@ -54,7 +54,7 @@ def main():
 
     experiment_path, folder_name = setup_experiment_path(save_path=save_path,
                                                          config_path=config_path,
-                                                         model_name=model_name)
+                                                         experiment=model_name)
     experiment_name = "augment_search"
     prepare_experiment_environment(experiment_name=experiment_name)
 

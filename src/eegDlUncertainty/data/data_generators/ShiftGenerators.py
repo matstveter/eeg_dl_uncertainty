@@ -3,22 +3,25 @@ from typing import Optional, Tuple
 import mne.io
 import numpy as np
 import torch
+from scipy.signal import hilbert
 from torch.utils.data import Dataset
-import matplotlib
-matplotlib.use('TkAgg')
-import matplotlib.pyplot as plt
 
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
 
 
 class EEGDatashiftGenerator(Dataset):
     def __init__(self, subjects: Tuple[str, ...], dataset: CauEEGDataset, use_age: bool, shift_intensity, shift_type,
-                 device: Optional[torch.device] = None, scalar_multi: Optional[float] = 0.5):
+                 device: Optional[torch.device] = None, **kwargs):
         super().__init__()
         self._use_age = use_age
         self._shift_type = shift_type
         self._eeg_info = dataset.eeg_info
-        self._use_notch = True
+        self._use_notch = False
+
+        print(kwargs)
+        self._scalar_multi = kwargs.pop("scalar_multi", 1.5)
+        self._phase_shift = kwargs.pop("phase_shift", np.pi / 4)
+        self._gaussian_std = kwargs.pop("gaussian_std", 0.1)
 
         if not 1.0 >= shift_intensity >= 0:
             raise ValueError("Shift intensity should be between 0.0 and 1.0.")
@@ -34,7 +37,6 @@ class EEGDatashiftGenerator(Dataset):
         else:
             shifted_eeg = inputs
 
-        self._scalar_multi = scalar_multi
         self._x = torch.tensor(shifted_eeg, dtype=torch.float32)
         self._y = torch.tensor(targets, dtype=torch.float32)
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device is None else device
@@ -212,10 +214,6 @@ class EEGDatashiftGenerator(Dataset):
         augmented. It loops through the data array and then if the channel of a subject is in the sub-selected
         channels:
 
-        Timereverse: Flip the signal so that the first time step is the last
-
-        Shift: Multiply the signal with -1, effectively flipping the sign of the signal
-
         Parameters
         ----------
         data: np.ndarray
@@ -227,7 +225,7 @@ class EEGDatashiftGenerator(Dataset):
             Array with the changes implemented
         """
 
-        augment_order = [1, 3, 5, 7, 9, 11, 13, 15, 17, 0, 2, 4, 6, 8, 10, 12, 14, 16, 18]
+        augment_order = (1, 3, 5, 7, 9, 11, 13, 15, 17, 0, 2, 4, 6, 8, 10, 12, 14, 16, 18)
         cur_channel_to_augment = augment_order[0: int(self._shift_intensity * len(augment_order))]
 
         altered_array = np.zeros_like(data)
@@ -237,14 +235,11 @@ class EEGDatashiftGenerator(Dataset):
                 # If the current channel is in the list of channels that should be reversed
                 if j in cur_channel_to_augment:
                     if self._shift_type == "gaussian_channel":
-                        noise = np.random.normal(0, 0.1, ch.shape)
+                        noise = np.random.normal(0, self._gaussian_std, ch.shape)
                         new_arr = ch + noise
                     elif self._shift_type == "phase_shift_channel":
                         # Plot difference after shift
-                        plt.plot(ch)
-                        plt.plot(self._phase_shift_data(ch, np.pi/2))
-                        plt.show()
-                        new_arr = self._phase_shift_data(ch, np.pi/2)
+                        new_arr = self._phase_shift_eeg(data=ch, phi=self._phase_shift)
                     elif self._shift_type == "scalar_modulation_channel":
                         new_arr = ch * self._scalar_multi
                     elif self._shift_type in ("theta_bandpass", "alpha_bandpass", "beta_bandpass", "delta_bandpass",
@@ -257,7 +252,7 @@ class EEGDatashiftGenerator(Dataset):
                         info = mne.create_info(ch_names=['EEG 001'], sfreq=self._eeg_info['sfreq'],
                                                ch_types=['eeg'])
                         # Create Raw object
-                        raw = mne.io.RawArray(eeg_data_2d, info)
+                        raw = mne.io.RawArray(eeg_data_2d, info, verbose=False)
                         # High-pass filter to remove frequencies below 12 Hz
                         raw_high_pass = raw.copy().filter(l_freq=l_freq, h_freq=None, verbose=False)
 
@@ -319,6 +314,33 @@ class EEGDatashiftGenerator(Dataset):
         return altered_array
 
     def _gaussian(self, data):
+        """
+        Apply Gaussian noise to the given EEG data.
+
+        This function takes a 2D array of EEG data and adds Gaussian noise to each data point.
+        The noise is generated with a mean of 0 and a standard deviation equal to the shift intensity.
+
+        Parameters
+        ----------
+        data : array_like
+            The input EEG data to which the noise will be applied. This should be a 2D array.
+
+        Returns
+        -------
+        array_like
+            The EEG data after the noise has been applied. This is a 2D array of the same size as the input data.
+
+        Notes
+        -----
+        The function starts by creating a new numpy array, `altered_array`, which has the same shape as the input data.
+        This array is initialized with zeros and will be used to store the noisy data.
+
+        The function then loops over the input data. For each subject's data (referred to as `sub` in the code),
+        it generates a noise array with the same shape as `sub` using `np.random.normal(0, self._shift_intensity,
+        sub. shape)`.
+        This noise array is then added to `sub` to create the noisy data, which is stored in the corresponding position
+        in `altered_array`.
+        """
         altered_array = np.zeros_like(data)
 
         for i, sub in enumerate(data):
@@ -326,9 +348,32 @@ class EEGDatashiftGenerator(Dataset):
             noisy_sub = sub + noise
             altered_array[i] = noisy_sub
 
-        return altered_array
+            return altered_array
 
     def _get_freq(self):
+        """
+        Determine the frequency band based on the shift type.
+
+        This method extracts the frequency band from the shift type, which is expected to be a string
+        in the format "<frequency_band>_<other_info>". The frequency band is the first part of the string,
+        before the underscore.
+
+        The method supports the following frequency bands: alpha, theta, delta, beta, lbeta, hbeta, and gamma.
+        Each frequency band corresponds to a specific range of frequencies, which are returned as a tuple
+        of the form (low_frequency, high_frequency).
+
+        If the frequency band is not recognized, the method raises a ValueError.
+
+        Returns
+        -------
+        tuple
+            A tuple of two integers representing the low and high frequencies of the band.
+
+        Raises
+        ------
+        ValueError
+            If the frequency band is not recognized.
+        """
         freq = self._shift_type.split("_")[0]
 
         if freq == "alpha":
@@ -371,7 +416,8 @@ class EEGDatashiftGenerator(Dataset):
         This array is initialized with zeros and will be used to store the modulated data.
 
         The function then loops over the input data. For each subject's data (referred to as `sub` in the code),
-        it multiplies the data by the shift intensity and stores the result in the corresponding position in `altered_array`.
+        it multiplies the data by the shift intensity and stores the result in the corresponding position
+        in `altered_array`.
         """
         altered_array = np.zeros_like(data)
 
@@ -382,43 +428,43 @@ class EEGDatashiftGenerator(Dataset):
         return altered_array
 
     @staticmethod
-    def _phase_shift_data(data, phi):
+    def _phase_shift_eeg(data, phi):
         """
-        Perform a phase shift on the given data.
+            Apply a phase shift to the given data.
 
-        This function takes a 1D array of data and a phase shift value in radians,
-        performs a Fourier Transform to move to the frequency domain, applies the phase shift,
-        and then performs an Inverse Fourier Transform to move back to the time domain.
+            This function takes a 1D array of data and a phase shift value, phi, in radians.
+            It first computes the analytical signal of the data using the Hilbert transform.
+            Then, it computes the phase of the analytical signal and adds the phase shift, phi, to it.
+            Finally, it computes the real part of the absolute value of the analytical signal multiplied by
+            the exponential of the phase data (which includes the phase shift).
+            The function returns this modified data.
 
-        Parameters
-        ----------
-        data : array_like
-            The input data to be phase shifted. This should be a 1D array.
-        phi : float
-            The phase shift to apply, in radians.
+            Parameters
+            ----------
+            data : array_like
+                The input data to which the phase shift will be applied. This should be a 1D array.
+            phi : float
+                The phase shift to apply, in radians.
 
-        Returns
-        -------
-        array_like
-            The phase-shifted data. This is a 1D array of the same size as the input data.
-
-        Notes
-        -----
-        The phase shift is performed by multiplying the Fourier Transform of the data by `e^(i*phi)`.
-        The result is then transformed back to the time domain using the Inverse Fourier Transform.
-        Only the real part of the result is returned, as the imaginary part should be zero (or close to zero
-        due to numerical precision issues) after the Inverse Fourier Transform.
+            Returns
+            -------
+            array_like
+                The data after the phase shift has been applied. This is a 1D array of the same size as the input data.
         """
-        # Fourier Transform
-        transformed = np.fft.fft(data)
+        # Compute the analytical signal of the data using the Hilbert transform
+        analytical_signal = hilbert(data)
 
-        # Phase Shift
-        shifted = transformed * np.exp(1j * phi)
+        # Compute the phase of the analytical signal
+        phase_data = np.angle(analytical_signal)
 
-        # Inverse Fourier Transform
-        result = np.fft.ifft(shifted)
+        # Add the phase shift to the phase data
+        phase_data += phi
 
-        return np.real(result)  # return only the real part
+        # Compute the real part of the absolute value of the analytical signal multiplied by the exponential of the
+        # phase data
+        modified_data = np.real(np.abs(analytical_signal) * np.exp(1j * phase_data))
+
+        return modified_data
 
     @property
     def x(self) -> torch.Tensor:

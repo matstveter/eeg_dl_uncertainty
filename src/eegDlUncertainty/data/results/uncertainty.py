@@ -107,10 +107,10 @@ def brier_score(probs, targets):
 
 
 def get_uncertainty_metrics(probs, targets):
-    return {'Brier': brier_score(probs=probs, targets=targets),
-            'NLL': nll(probs=probs, targets=targets),
-            'ECE': ece(probs=probs, targets=targets).numpy().item(),
-            'MCE': mce(probs=probs, targets=targets).numpy().item()}
+    return {'brier': brier_score(probs=probs, targets=targets),
+            'nll': nll(probs=probs, targets=targets),
+            'ece': ece(probs=probs, targets=targets).numpy().item(),
+            'mce': mce(probs=probs, targets=targets).numpy().item()}
 
 
 def compute_classwise_brier(mean_probs, one_hot_target, targets):

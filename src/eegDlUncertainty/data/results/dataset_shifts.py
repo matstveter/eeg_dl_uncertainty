@@ -3,23 +3,60 @@ import torch
 from torch.utils.data import DataLoader
 
 from eegDlUncertainty.data.data_generators.ShiftGenerators import EEGDatashiftGenerator
+from eegDlUncertainty.data.results.plotter import single_datashift_plotter
 from eegDlUncertainty.data.results.uncertainty import calculate_performance_metrics, compute_classwise_uncertainty, \
     get_uncertainty_metrics
 from eegDlUncertainty.data.utils import save_dict_to_pickle
 
 
-def evaluate_shift(shift_type, model, test_subjects, dataset, use_age, device, batch_size, baseline):
+def activation_function(logits, ensemble, ret_prob=True):
+    """
+    Apply softmax activation function to the logits and optionally return the class with the highest probability.
+
+    This function applies the softmax activation function to the logits to convert them into probabilities.
+    If `ensemble` is True, it assumes that the logits are from an ensemble of models and applies softmax along the second dimension.
+    If `ensemble` is False, it assumes that the logits are from a single model and applies softmax along the first dimension.
+
+    If `ret_prob` is False, the function also returns the class with the highest probability.
+
+    Parameters
+    ----------
+    logits : torch.Tensor
+        The logits to which the softmax activation function will be applied.
+    ensemble : bool
+        Whether the logits are from an ensemble of models.
+    ret_prob : bool, optional
+        Whether to return the probabilities or the class with the highest probability. Default is True.
+
+    Returns
+    -------
+    numpy.ndarray
+        The probabilities after applying the softmax activation function, or the class with the highest probability.
+    """
+    if ensemble:
+        outp = torch.softmax(logits, dim=2)
+        if not ret_prob:
+            _, outp = torch.max(outp, dim=2)
+    else:
+        outp = torch.softmax(logits, dim=1)
+        if not ret_prob:
+            _, outp = torch.max(outp, dim=1)
+    return outp.numpy()
+
+
+def evaluate_shift(shift_type, model, test_subjects, dataset, use_age, device, batch_size, baseline, save_path, 
+                   **kwargs):
     if baseline:
         shift_intensity = [0.0]
     else:
-        shift_intensity = [0.1, 0.2, 0.4, 0.8, 1.0]
+        shift_intensity = [0.0, 0.1, 0.25, 0.5, 0.75, 1.0]
 
     shift_results = {}
     shift_predictions = {}
 
     for s in shift_intensity:
         shift_dataset = EEGDatashiftGenerator(subjects=test_subjects, dataset=dataset, use_age=use_age, device=device,
-                                              shift_type=shift_type, shift_intensity=s)
+                                              shift_type=shift_type, shift_intensity=s, **kwargs)
         shift_loader = DataLoader(dataset=shift_dataset, batch_size=batch_size, shuffle=False)
 
         if not isinstance(model, list):
@@ -30,14 +67,14 @@ def evaluate_shift(shift_type, model, test_subjects, dataset, use_age, device, b
             print("Testing with the ensemble")
             logits = []
             for m in model:
-                ensemble_logits, targets = m.get_predictions(test_loader=shift_loader, device=device)
+                ensemble_logits, targets = m.get_predictions(loader=shift_loader, device=device)
                 logits.append(ensemble_logits)
             logits = np.array(logits)  # shape: (num_models, num_samples, num_classes)
 
         mean_logits = torch.from_numpy(np.mean(logits, axis=0))
-        all_predictions = torch.softmax(torch.from_numpy(logits), dim=2).numpy()
-        probs = model.activation_function(logits=mean_logits).cpu().detach().numpy()
-        predictions = model.activation_function(logits=mean_logits, ret_prob=False).cpu().detach().numpy()
+        all_predictions = activation_function(logits=torch.from_numpy(logits), ensemble=True)
+        probs = activation_function(logits=mean_logits, ensemble=False)
+        predictions = activation_function(logits=mean_logits, ensemble=False, ret_prob=False)
         target_classes = np.argmax(targets, axis=1)
 
         shift_predictions[s] = {"mean_logits": mean_logits,
@@ -57,90 +94,80 @@ def evaluate_shift(shift_type, model, test_subjects, dataset, use_age, device, b
                             f"uncertainty": uncertainty,
                             "class_uncertainty": class_uncertainty}
 
+    print(f"Finished testing with shift type: {shift_type}: {shift_results}")
+    single_datashift_plotter(shift_result=shift_results, shift_type=shift_type, save_path=save_path)
     return shift_results, shift_predictions
 
 
 def evaluate_dataset_shifts(model, test_subjects, dataset, device, use_age, batch_size, save_path):
-    res_baseline, pred_baseline = evaluate_shift(shift_type=None, model=model, test_subjects=test_subjects,
-                                                 dataset=dataset, device=device, use_age=use_age, batch_size=batch_size,
-                                                 baseline=True)
 
+    final_results = {}
+
+    # res_baseline, pred_baseline = evaluate_shift(shift_type=None, model=model, test_subjects=test_subjects,
+    #                                              dataset=dataset, device=device, use_age=use_age, batch_size=batch_size,
+    #                                              baseline=True, save_path=save_path)
+    # final_results["baseline"] = {"results": res_baseline, "predictions": pred_baseline}
+    #
     res_class_combi, pred_class_combi = evaluate_shift(shift_type="class_combination_temporal", model=model,
                                                        test_subjects=test_subjects, dataset=dataset, device=device,
-                                                       use_age=use_age, batch_size=batch_size, baseline=False)
+                                                       use_age=use_age, batch_size=batch_size, baseline=False,
+                                                       save_path=save_path)
+    final_results["class_combination"] = {"results": res_class_combi, "predictions": pred_class_combi}
+    #
+    # bandpass = ['delta', 'theta', 'alpha', 'beta', 'hbeta', 'lbeta', 'gamma']
+    # # Testing the effect of different bandpass filters
+    # for band in bandpass:
+    #     res_band, pred_band = evaluate_shift(shift_type=f"{band}_bandpass", model=model, test_subjects=test_subjects,
+    #                                          dataset=dataset, device=device, use_age=use_age, batch_size=batch_size,
+    #                                          baseline=False, save_path=save_path)
+    #     final_results[band] = {"results": res_band, "predictions": pred_band}
+    #
+    # gaussian_std = [0.1, 0.2, 0.4, 0.8, 1.0]
+    # # Gaussian noise
+    # for g in gaussian_std:
+    #     res_gaussian, pred_gaussian = evaluate_shift(shift_type="gaussian_channel", model=model,
+    #                                                  test_subjects=test_subjects, dataset=dataset,
+    #                                                  device=device, use_age=use_age, batch_size=batch_size,
+    #                                                  baseline=False, save_path=save_path gaussian_std=g)
+    #     final_results[f"gaussian_channel_{g}"] = {"results": res_gaussian, "predictions": pred_gaussian}
+    #
+    # res_gaussian, pred_gaussian = evaluate_shift(shift_type="gaussian", model=model, test_subjects=test_subjects,
+    #                                              dataset=dataset, device=device, use_age=use_age, batch_size=batch_size,
+    #                                              baseline=False, save_path=save_path)
+    # final_results["gaussian_all"] = {"results": res_gaussian, "predictions": pred_gaussian}
 
-    # Testing the effect of different bandpass filters
-    res_alpha, pred_alpha = evaluate_shift(shift_type="alpha_bandpass", model=model, test_subjects=test_subjects,
-                                           dataset=dataset, device=device, use_age=use_age, batch_size=batch_size,
-                                           baseline=False)
-    res_beta, pred_beta = evaluate_shift(shift_type="beta_bandpass", model=model, test_subjects=test_subjects,
-                                         dataset=dataset, device=device, use_age=use_age, batch_size=batch_size,
-                                         baseline=False)
-    res_hbeta, pred_hbeta = evaluate_shift(shift_type="hbeta_bandpass", model=model, test_subjects=test_subjects,
-                                           dataset=dataset, device=device, use_age=use_age, batch_size=batch_size,
-                                           baseline=False)
-    res_lbeta, pred_lbeta = evaluate_shift(shift_type="lbeta_bandpass", model=model, test_subjects=test_subjects,
-                                           dataset=dataset, device=device, use_age=use_age, batch_size=batch_size,
-                                           baseline=False)
-    res_theta, pred_theta = evaluate_shift(shift_type="theta_bandpass", model=model, test_subjects=test_subjects,
-                                           dataset=dataset, device=device, use_age=use_age, batch_size=batch_size,
-                                           baseline=False)
-    res_delta, pred_delta = evaluate_shift(shift_type="delta_bandpass", model=model, test_subjects=test_subjects,
-                                           dataset=dataset, device=device, use_age=use_age, batch_size=batch_size,
-                                           baseline=False)
-    res_gamma, pred_gamma = evaluate_shift(shift_type="gamma_bandpass", model=model, test_subjects=test_subjects,
-                                           dataset=dataset, device=device, use_age=use_age, batch_size=batch_size,
-                                           baseline=False)
-
-    # Gaussian noise
-    res_gaussian, pred_gaussian = evaluate_shift(shift_type="gaussian", model=model, test_subjects=test_subjects,
-                                                 dataset=dataset, device=device, use_age=use_age, batch_size=batch_size,
-                                                 baseline=False)
-    res_gaussian_c, pred_gaussian_c = evaluate_shift(shift_type="gaussian_channel", model=model,
-                                                     test_subjects=test_subjects,
-                                                     dataset=dataset, device=device, use_age=use_age,
-                                                     batch_size=batch_size, baseline=False)
-
-    # Phase shift
-    res_phase_shift_c, pred_phase_shift_c = evaluate_shift(shift_type="phase_shift_channel", model=model,
-                                                           test_subjects=test_subjects,
-                                                           dataset=dataset, device=device, use_age=use_age,
-                                                           batch_size=batch_size, baseline=False)
-
-    # Scalar modulation
-    # todo Remember to change the scalar modulation value in the datashift generator
-    res_scalar, pred_scalar = evaluate_shift(shift_type="scalar_modulation", model=model, test_subjects=test_subjects,
-                                             dataset=dataset, device=device, use_age=use_age, batch_size=batch_size,
-                                             baseline=False)
-    res_scalar_c, pred_scalar_c = evaluate_shift(shift_type="scalar_modulation_channel", model=model,
-                                                 test_subjects=test_subjects,
-                                                 dataset=dataset, device=device, use_age=use_age, batch_size=batch_size,
-                                                 baseline=False)
-
-    # interpolate
+    # phase_shift = [np.pi/8, np.pi/4, np.pi/2, np.pi, 3*np.pi/2]
+    # # Phase shift
+    # for p in phase_shift:
+    #     res_phase_shift, pred_phase_shift = evaluate_shift(shift_type="phase_shift_channel", model=model,
+    #                                                        test_subjects=test_subjects, dataset=dataset,
+    #                                                        device=device, use_age=use_age, batch_size=batch_size,
+    #                                                        baseline=False, save_path=save_path, phase_shift=p)
+    #     final_results[f"phase_shift_channel_{p}"] = {"results": res_phase_shift, "predictions": pred_phase_shift}
+    #
+    # scalar_modulation = [0.1, 0.5, 0.75, 1.5, 2.0]
+    # # Scalar modulation
+    # for s in scalar_modulation:
+    #     res_scalar, pred_scalar = evaluate_shift(shift_type="scalar_modulation", model=model, test_subjects=test_subjects,
+    #                                              dataset=dataset, device=device, use_age=use_age, batch_size=batch_size,
+    #                                              baseline=False, save_path=save_path,
+    #                                              scalar_multi=s)
+    #     final_results[f"scalar_modulation_{s}"] = {"results": res_scalar, "predictions": pred_scalar}
+    #
+    # for s in scalar_modulation:
+    #     res_scalar_c, pred_scalar_c = evaluate_shift(shift_type="scalar_modulation_channel", model=model,
+    #                                                  test_subjects=test_subjects, dataset=dataset, device=device,
+    #                                                  use_age=use_age, batch_size=batch_size, baseline=False,
+    #                                                  save_path=save_path,
+    #                                                  scalar_multi=s)
+    #     final_results[f"scalar_modulation_channel_{s}"] = {"results": res_scalar_c, "predictions": pred_scalar_c}
+    #
+    # # interpolate
     res_interpolate, pred_interpolate = evaluate_shift(shift_type="interpolate", model=model,
                                                        test_subjects=test_subjects,
                                                        dataset=dataset, device=device, use_age=use_age,
-                                                       batch_size=batch_size, baseline=False)
-
-    # todo Consider adding muscle artifact, eye blink, and eye movement as noise?
-
-    final_results = {"baseline": {"results": res_baseline, "predictions": pred_baseline},
-                     "class_combination": {"results": res_class_combi, "predictions": pred_class_combi},
-                     "alpha": {"results": res_alpha, "predictions": pred_alpha},
-                     "beta": {"results": res_beta, "predictions": pred_beta},
-                     "hbeta": {"results": res_hbeta, "predictions": pred_hbeta},
-                     "lbeta": {"results": res_lbeta, "predictions": pred_lbeta},
-                     "theta": {"results": res_theta, "predictions": pred_theta},
-                     "delta": {"results": res_delta, "predictions": pred_delta},
-                     "gamma": {"results": res_gamma, "predictions": pred_gamma},
-                     "gaussian": {"results": res_gaussian, "predictions": pred_gaussian},
-                     "gaussian_channel": {"results": res_gaussian_c, "predictions": pred_gaussian_c},
-                     "phase_shift_channel": {"results": res_phase_shift_c, "predictions": pred_phase_shift_c},
-                     "scalar_modulation": {"results": res_scalar, "predictions": pred_scalar},
-                     "scalar_modulation_channel": {"results": res_scalar_c, "predictions": pred_scalar_c},
-                     "interpolate": {"results": res_interpolate, "predictions": pred_interpolate}}
+                                                       batch_size=batch_size, baseline=False, save_path=save_path)
+    final_results["interpolate"] = {"results": res_interpolate, "predictions": pred_interpolate}
 
     save_dict_to_pickle(final_results, save_path, "datashift_results")
-
     return final_results
