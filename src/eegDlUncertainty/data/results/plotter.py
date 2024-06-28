@@ -247,13 +247,13 @@ def multiple_runs_plotter(ensemble_names, ensemble_results, save_path):
 
             # Plotting the results
             plt.figure(figsize=FIG_SIZE)
-
             for i, name in enumerate(ensemble_names):
                 current_datashift = ensemble_results[i][d_shift]
                 x = list(current_datashift.keys())
                 y = [current_datashift[amount_shift][metric][p] for amount_shift in x]
-                print(y)
+                print(f"y: {y}")
                 sns.lineplot(x=x, y=y, marker='o', linestyle='-', label=name)
+
             sns.despine()
             plt.title(f'{d_shift.upper()}: {p.upper()}', fontsize=TITLE_FONT, weight='bold')
             plt.xlabel('Dataset Shift', fontsize=LABEL_FONT)

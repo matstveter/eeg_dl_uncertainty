@@ -49,6 +49,7 @@ def get_folder(result_path):
 
 
 def get_run_data(path):
+    print(path)
     with open(path + "/datashift_results.pkl", "rb") as f:
         data = dict(pickle.load(f))
 
@@ -56,6 +57,7 @@ def get_run_data(path):
     # Only interested in the results and not the predictions
     for key, val in data.items():
         new_dict[key] = val['results']
+
 
     return new_dict
 
@@ -80,8 +82,8 @@ if __name__ == '__main__':
     save_path = os.path.join("./plots/", folder_name)
     os.makedirs(save_path, exist_ok=True)
 
-    folders_to_plot = ["/home/tvetern/PhD/dl_uncertainty/results/weight_ensemble_2024-06-27 14_26_50",
-                       "/home/tvetern/PhD/dl_uncertainty/results/bagging_ensemble_2024-06-27 12_58_30"]
+    folders_to_plot = ["/home/tvetern/PhD/dl_uncertainty/results/weight_ensemble_2024-06-27 14_58_11", 
+                       "/home/tvetern/PhD/dl_uncertainty/results/weight_ensemble_2024-06-27 15_10_29"]
 
     if len(folders_to_plot) == 0:
         folders_to_plot = get_folder(result_path)
@@ -98,6 +100,8 @@ if __name__ == '__main__':
             while ensemble_name in names:
                 ensemble_name = ensemble_name + "_" + str(i)
                 i += 1
+
+            print(ensemble_name)
 
             names.append(ensemble_name)
             results.append(get_run_data(f))

@@ -94,7 +94,6 @@ def evaluate_shift(shift_type, model, test_subjects, dataset, use_age, device, b
                             f"uncertainty": uncertainty,
                             "class_uncertainty": class_uncertainty}
 
-    print(f"Finished testing with shift type: {shift_type}: {shift_results}")
     single_datashift_plotter(shift_result=shift_results, shift_type=shift_type, save_path=save_path)
     return shift_results, shift_predictions
 

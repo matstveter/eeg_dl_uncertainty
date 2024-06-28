@@ -57,8 +57,8 @@ class _InceptionModule(nn.Module):
         # Define convolutional layers with different
         # kernel sizes (to be concatenated at the end)
         # -------------------------------
-        # kernel_sizes = [max_kernel_size // (2 ** i) for i in range(_InceptionModule.num_kernel_sizes)]
-        kernel_sizes = [9, 19, 39]
+        kernel_sizes = [max_kernel_size // (2 ** i) for i in range(_InceptionModule.num_kernel_sizes)]
+        # kernel_sizes = [9, 19, 39]
 
         self._conv_list = nn.ModuleList([nn.Conv1d(in_channels=out_channels, out_channels=units,
                                                    kernel_size=kernel_size, stride=1, padding="same", bias=False)

@@ -15,6 +15,7 @@ from eegDlUncertainty.data.dataset.OODDataset import GreekEEGDataset, TDBrainDat
 from eegDlUncertainty.data.results.dataset_shifts import evaluate_dataset_shifts
 from eegDlUncertainty.data.results.history import History, MCHistory, get_history_objects
 from eegDlUncertainty.data.results.ood_exp import ood_experiment
+from eegDlUncertainty.data.results.result_utils import ensemble_performance
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information
 from eegDlUncertainty.data.utils import save_dict_to_pickle
 from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \
@@ -178,8 +179,12 @@ def main():
 
             finally:
                 mlflow.end_run()
+        if use_test_set:
+            ensemble_performance(classifiers, test_loader, device, save_path=experiment_path)
+        else:
+            ensemble_performance(classifiers, val_loader, device, save_path=experiment_path)
 
-        datashift_results = evaluate_dataset_shifts(model=classifiers, test_subjects=val_subjects, dataset=dataset,
+        evaluate_dataset_shifts(model=classifiers, test_subjects=val_subjects, dataset=dataset,
                                                     device=device, use_age=use_age, batch_size=batch_size,
                                                     save_path=experiment_path)
         # ood_results = ood_experiment(classifiers, dataset_version=dataset_version, num_seconds=num_seconds,

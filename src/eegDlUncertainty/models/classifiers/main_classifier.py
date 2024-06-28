@@ -25,9 +25,9 @@ class MainClassifier(abc.ABC, nn.Module):
         if pretrained is not None:
             self.classifier = self.from_disk(path=pretrained)
         else:
+            kwargs['classifier_name'] = model_name
             self.classifier = get_models(model_name=model_name, **kwargs)
             hyperparameters = kwargs.copy()
-            # hyperparameters['classifier_name'] = model_name
             self._hyperparameters = hyperparameters
             self._name = model_name
 
@@ -126,7 +126,7 @@ class MainClassifier(abc.ABC, nn.Module):
 
     def fit_model(self, *, train_loader: DataLoader, val_loader: DataLoader, training_epochs: int,
                   device: torch.device, loss_fn: _Loss, train_hist: History, val_history: History,
-                  earlystopping_patience: int):
+                  earlystopping_patience: int, **kwargs):
 
         best_loss = 1_000_000
         optimizer = torch.optim.Adam(self.classifier.parameters(), lr=self._learning_rate)
@@ -443,24 +443,28 @@ class MCClassifier(MainClassifier):
 class SnapshotClassifier(MainClassifier):
     def fit_model(self, *, train_loader: DataLoader, val_loader: DataLoader, training_epochs: int,
                   device: torch.device, loss_fn: _Loss, train_hist: History, val_history: History,
-                  earlystopping_patience: int):
-        best_loss = 1_000_000
-        epochs_per_cycle = 50
-        start_lr = 0.1
+                  earlystopping_patience: int, **kwargs):
+        print(kwargs)
+        start_lr = kwargs.pop("start_lr")
+        num_cycles = kwargs.pop("num_cycles")
+        epochs_per_cycle = kwargs.pop("epochs_per_cycle")
+        use_best = kwargs.pop("use_best")
 
-        num_cycles = int(training_epochs / epochs_per_cycle)
-
-        optimizer = torch.optim.Adam(self.classifier.parameters(), lr=self._learning_rate)
+        optimizer = torch.optim.Adam(self.classifier.parameters(), lr=start_lr)
         self.to(device)
-        scheduler = CosineAnnealingLR(optimizer, T_max=epochs_per_cycle)
-
         model_weight_paths = []
-
         for cycle in range(num_cycles):
-            print(f"Cycle {cycle + 1}/{num_cycles}")
+            # Manually reset the learning rate for the optimizer without resetting its state
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = start_lr
 
+            scheduler = CosineAnnealingLR(optimizer, T_max=epochs_per_cycle, eta_min=0.000001)
+            best_loss = float('inf')
+            best_model_path = None
+
+            print(f"Cycle {cycle + 1}/{num_cycles}")
+            self.train()
             for epoch in range(epochs_per_cycle):
-                self.train()
                 for data, targets in train_loader:
                     inputs, targets = data.to(device), targets.to(device)
                     optimizer.zero_grad()
@@ -473,27 +477,36 @@ class SnapshotClassifier(MainClassifier):
                     loss.backward()
                     optimizer.step()
 
+                train_hist.on_epoch_end()
                 scheduler.step()
                 print(f"\n--- CYCLE: {cycle + 1} / {num_cycles} EPOCH {epoch + 1} / {epochs_per_cycle} --- LR: "
                       f"{scheduler.get_last_lr()[0]}")
-            
-            self.eval()
-            with torch.no_grad():
-                for inputs, targets in val_loader:
-                    inputs, targets = inputs.to(device), targets.to(device)
-                    outputs = self(inputs)
 
-                    val_loss = loss_fn(outputs, targets)
+                self.eval()
+                with torch.no_grad():
+                    for inputs, targets in val_loader:
+                        inputs, targets = inputs.to(device), targets.to(device)
+                        outputs = self(inputs)
 
-                    # Activation function and store values
-                    y_pred = self.activation_function(logits=outputs)
-                    val_history.batch_stats(y_pred=y_pred, y_true=targets, loss=val_loss)
-                val_history.on_epoch_end()
+                        val_loss = loss_fn(outputs, targets)
 
-            path = os.path.join(self._model_path, f"snapshot_{cycle}")
-            self.classifier.save(path=path)
+                        # Activation function and store values
+                        y_pred = self.activation_function(logits=outputs)
+                        val_history.batch_stats(y_pred=y_pred, y_true=targets, loss=val_loss)
+                    val_history.on_epoch_end()
 
-            # save the abs path to the models making it easier to load it later...
-            model_weight_paths.append(path)
+                if val_history.get_last_loss() < best_loss and use_best:
+                    best_loss = val_history.get_last_loss()
+                    best_model_path = os.path.join(self._model_path, f"snapshot_{cycle}_model")
+                    self.classifier.save(path=best_model_path)
+
+            # Todo Why not save the best mode within each cycle?
+            if best_model_path and use_best:
+                # save the abs path to the models making it easier to load it later...
+                model_weight_paths.append(best_model_path)
+            else:
+                path = os.path.join(self._model_path, f"snapshot_{cycle}_model")
+                self.classifier.save(path=path)
+                model_weight_paths.append(path)
 
         return model_weight_paths

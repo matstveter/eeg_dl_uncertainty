@@ -26,6 +26,7 @@ class BaseClassifier(nn.Module):
 
         Returns: Nothing
 
+
         """
         # Get state (everything needed to load the model)
         state = {"state_dict": self.state_dict(), "classifier_name": self._name,

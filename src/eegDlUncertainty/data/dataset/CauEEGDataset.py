@@ -632,4 +632,7 @@ class CauEEGDataset:
             # print(f"{split.upper()} - {class_name.upper()}:\n\tCount: {count}\n\tPropo: {proportion:.2f}")
             stats[f"{class_name.upper()}"] = f" count: {count}, %: {proportion}"
 
-        mlflow.log_param(f"Class Statistics - {split.upper()}", stats)
+        try:
+            mlflow.log_param(f"Class Statistics - {split.upper()}", stats)
+        except mlflow.exceptions.MlflowException:
+            print("MLFlowException: Overlapping values, will happen in bagging_ensemble, but not a problem. Skipping.")

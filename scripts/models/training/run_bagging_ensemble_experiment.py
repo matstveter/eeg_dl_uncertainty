@@ -16,6 +16,7 @@ from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
 from eegDlUncertainty.data.results.dataset_shifts import evaluate_dataset_shifts
 from eegDlUncertainty.data.results.history import History, get_history_objects
 from eegDlUncertainty.data.results.ood_exp import ood_experiment
+from eegDlUncertainty.data.results.result_utils import ensemble_performance
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information
 from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \
     prepare_experiment_environment, \
@@ -137,15 +138,16 @@ def main():
         for run_id in range(num_bagging_ensembles):
             train_loader = train_loader_list[run_id]
 
-            # todo Consider making the models a bit simpler as the dataset is smaller
-
+            # Setting depth and cnn units to half of the standard to have simpler base models
             mlflow.start_run(run_name=f"{experiment}_{str(run_id)}", nested=True)
             run_path = create_run_folder(path=experiment_path, index=str(run_id))
             hyperparameters = {"in_channels": dataset.num_channels,
                                "num_classes": dataset.num_classes,
                                "time_steps": dataset.eeg_len,
                                "save_path": run_path,
-                               "learning_rate": learning_rate}
+                               "learning_rate": learning_rate,
+                               "depth": 3,
+                               "cnn_units": 16}
             param.update(hyperparameters)
             add_config_information(config=param, dataset="CAUEEG")
 
@@ -187,14 +189,20 @@ def main():
             finally:
                 mlflow.end_run()
 
-        datashift_results = evaluate_dataset_shifts(model=classifiers, test_subjects=val_subjects, dataset=dataset,
-                                                    device=device, use_age=use_age, batch_size=batch_size,
-                                                    save_path=experiment_path)
+        if use_test_set:
+            ensemble_performance(classifiers, test_loader, device, save_path=experiment_path)
+            evaluate_dataset_shifts(model=classifiers, test_subjects=val_subjects, dataset=dataset,
+                                    device=device, use_age=use_age, batch_size=batch_size,
+                                    save_path=experiment_path)
+        else:
+            ensemble_performance(classifiers, val_loader, device, save_path=experiment_path)
+            evaluate_dataset_shifts(model=classifiers, test_subjects=test_subjects, dataset=dataset,
+                                    device=device, use_age=use_age, batch_size=batch_size,
+                                    save_path=experiment_path)
+
         ood_results = ood_experiment(classifiers, dataset_version=dataset_version, num_seconds=num_seconds,
                                      age_scaling=age_scaling, device=device, batch_size=batch_size,
                                      save_path=experiment_path)
-
-        # todo What to do with plots???
 
 
 if __name__ == "__main__":

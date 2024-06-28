@@ -1,9 +1,3 @@
-import matplotlib
-
-from eegDlUncertainty.data.results.ood_exp import ood_experiment
-from eegDlUncertainty.data.results.result_utils import ensemble_performance
-
-matplotlib.use("TkAgg")
 import argparse
 import os
 import random
@@ -17,18 +11,21 @@ from torch.utils.data import DataLoader
 from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
 from eegDlUncertainty.data.data_generators.augmentations import get_augmentations
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
+from eegDlUncertainty.data.dataset.OODDataset import GreekEEGDataset, TDBrainDataset
 from eegDlUncertainty.data.results.dataset_shifts import evaluate_dataset_shifts
-from eegDlUncertainty.data.results.history import History, get_history_objects
+from eegDlUncertainty.data.results.history import History, MCHistory, get_history_objects
+from eegDlUncertainty.data.results.ood_exp import ood_experiment
+from eegDlUncertainty.data.results.result_utils import ensemble_performance
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information
+from eegDlUncertainty.data.utils import save_dict_to_pickle
 from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \
     prepare_experiment_environment, \
     setup_experiment_path
-from eegDlUncertainty.models.classifiers.main_classifier import SnapshotClassifier
+from eegDlUncertainty.models.classifiers.main_classifier import MCClassifier, MainClassifier
 
-from eegDlUncertainty.data.dataset.OODDataset import GreekEEGDataset, MPILemonDataset, TDBrainDataset
 
 def main():
-    experiment = "snapshot_ensemble"
+    experiment = "depth_ensemble"
     #########################################################################################################
     # Get arguments and read config file
     #########################################################################################################
@@ -72,11 +69,6 @@ def main():
     learning_rate: float = parameters.pop("learning_rate")
     earlystopping: int = parameters.pop("earlystopping")
 
-    # For the snapshot ensemble
-    snapshot_cycle_epochs: int = parameters.pop("snapshot_cycle_epochs")
-    snapshot_num_cycles: int = parameters.pop("snapshot_num_cycles")
-    snapshot_start_lr: float = parameters.pop("snapshot_lr")
-    snapshot_use_best_model: bool = parameters.pop("snapshot_use_best_model")
 
     random_state: int = 42
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -134,10 +126,11 @@ def main():
 
     with mlflow.start_run(run_name=folder_name):
         # Setup MLFLOW experiment
-        num_runs = 1
+        depths = [3, 5, 6, 9, 10, 12]
+        classifiers = []
 
-        for run_id in range(num_runs):
-            print("Starting run: ", run_id)
+        for run_id in range(len(depths)):
+
             mlflow.start_run(run_name=f"{experiment}_{str(run_id)}", nested=True)
             run_path = create_run_folder(path=experiment_path, index=str(run_id))
             hyperparameters = {"in_channels": dataset.num_channels,
@@ -146,21 +139,17 @@ def main():
                                "save_path": run_path,
                                "learning_rate": learning_rate}
             param.update(hyperparameters)
+            param['depth'] = depths[run_id]
+
             add_config_information(config=param, dataset="CAUEEG")
 
-            classifier = SnapshotClassifier(model_name=model_name, **hyperparameters)
+            classifier = MainClassifier(model_name=model_name, **hyperparameters)
             train_history, val_history = get_history_objects(train_loader=train_loader, val_loader=val_loader,
                                                              save_path=save_path, num_classes=dataset.num_classes)
             try:
-                model_weight_list = classifier.fit_model(train_loader=train_loader, training_epochs=train_epochs,
-                                                         device=device, loss_fn=criterion,
-                                                         earlystopping_patience=earlystopping,
-                                                         val_loader=val_loader, train_hist=train_history,
-                                                         val_history=val_history,
-                                                         start_lr=snapshot_start_lr,
-                                                         epochs_per_cycle=snapshot_cycle_epochs,
-                                                         use_best=snapshot_use_best_model,
-                                                         num_cycles=snapshot_num_cycles)
+                _ = classifier.fit_model(train_loader=train_loader, training_epochs=train_epochs, device=device,
+                                         loss_fn=criterion, earlystopping_patience=earlystopping,
+                                         val_loader=val_loader, train_hist=train_history, val_history=val_history)
             except torch.cuda.OutOfMemoryError as e:
                 mlflow.set_tag("Exception", "CUDA Out of Memory Error")
                 mlflow.log_param("Exception Message", str(e))
@@ -168,50 +157,43 @@ def main():
                 print(f"Cuda Out Of Memory -> Cleanup -> Error message: {e}")
                 break
             else:
-                # Save the training and validation history
+
+                if use_test_set:
+                    evaluation_history = History(num_classes=dataset.num_classes, set_name="test",
+                                                 loader_lenght=len(test_loader), save_path=run_path)
+                    classifier.test_model(test_loader=test_loader, device=device, test_hist=evaluation_history,
+                                          loss_fn=criterion)
+                else:
+                    evaluation_history = History(num_classes=dataset.num_classes, set_name="test_val",
+                                                 loader_lenght=len(val_loader), save_path=run_path)
+                    classifier.test_model(test_loader=val_loader, device=device, test_hist=evaluation_history,
+                                          loss_fn=criterion)
+
                 train_history.save_to_mlflow()
                 train_history.save_to_pickle()
                 val_history.save_to_mlflow()
                 val_history.save_to_pickle()
+                evaluation_history.save_to_mlflow()
+                evaluation_history.save_to_pickle()
 
-                classifiers = []
-
-                # Load all the models from the weigh lists
-                for m_weights in model_weight_list:
-                    classifiers.append(SnapshotClassifier(model_name=model_name, pretrained=m_weights,
-                                                          **hyperparameters))
-
-                # For each classifier, test the model and save the history
-                for i, cl in enumerate(classifiers):
-                    print(f"Testing classifier {i+1} of {len(classifiers)}. ")
-                    if use_test_set:
-                        evaluation_history = History(num_classes=dataset.num_classes, set_name=f"test_{i}",
-                                                     loader_lenght=len(test_loader), save_path=run_path)
-                        cl.test_model(test_loader=test_loader, device=device, test_hist=evaluation_history,
-                                      loss_fn=criterion)
-                    else:
-                        evaluation_history = History(num_classes=dataset.num_classes, set_name=f"test_val_{i}",
-                                                     loader_lenght=len(val_loader), save_path=run_path)
-                        cl.test_model(test_loader=val_loader, device=device, test_hist=evaluation_history,
-                                      loss_fn=criterion)
-                    evaluation_history.save_to_mlflow()
-                    evaluation_history.save_to_pickle()
+                classifiers.append(classifier)
 
             finally:
                 mlflow.end_run()
-            if use_test_set:
-                ensemble_performance(classifiers, test_loader, device, save_path=experiment_path)
-            else:
-                ensemble_performance(classifiers, val_loader, device, save_path=experiment_path)
+        if use_test_set:
+            ensemble_performance(classifiers, test_loader, device, save_path=experiment_path)
+        else:
+            ensemble_performance(classifiers, val_loader, device, save_path=experiment_path)
 
-            # evaluate_dataset_shifts(model=classifiers, test_subjects=val_subjects, dataset=dataset,
-            #                                             device=device, use_age=use_age, batch_size=batch_size,
-            #                                             save_path=experiment_path)
-            # ood_results = ood_experiment(classifiers, dataset_version=dataset_version, num_seconds=num_seconds,
-            #                              age_scaling=age_scaling, device=device, batch_size=batch_size,
-            #                              save_path=experiment_path)
-            #
-            #
+        # evaluate_dataset_shifts(model=classifiers, test_subjects=val_subjects, dataset=dataset,
+        #                                             device=device, use_age=use_age, batch_size=batch_size,
+        #                                             save_path=experiment_path)
+        # ood_results = ood_experiment(classifiers, dataset_version=dataset_version, num_seconds=num_seconds,
+        #                              age_scaling=age_scaling, device=device, batch_size=batch_size,
+        #                              save_path=experiment_path)
+
+        # todo What to do with plots???
+
 
 if __name__ == "__main__":
     main()

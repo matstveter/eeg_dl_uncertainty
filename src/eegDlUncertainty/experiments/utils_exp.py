@@ -105,14 +105,22 @@ def get_parameters_from_config(config_path):
     augmentations: Optional[List[str]] = config.get('hyperparameters', {}).get('augmentations')
     training_epochs: int = config.get('model', {}).get('epochs')
     earlystopping: int = config.get('model', {}).get('earlystopping')
+
     mc_dropout_enabled: bool = config.get('mc_dropout', {}).get('enabled', False)
     mc_dropout_rate: float = config.get('mc_dropout', {}).get('dropout_rate')
+
     swa_enabled: bool = config.get('swa', {}).get('enabled', False)
     swa_lr: float = config.get('swa', {}).get('swa_lr')
     swa_epochs: int = config.get('swa', {}).get('swa_epochs')
+
     swag_enabled: bool = config.get('swag', {}).get('enabled', False)
     swag_lr: float = config.get('swag', {}).get('swag_lr')
     swag_freq: int = config.get('swag', {}).get('swag_freq')
+
+    snapshot_epochs: int = config.get('snapshot', {}).get('epochs_per_cycle')
+    snapshot_num_cycles: int = config.get('snapshot', {}).get('num_cycles')
+    snapshot_lr: float = config.get('snapshot', {}).get('start_lr')
+    snapshot_use_best_model: bool = config.get('snapshot', {}).get('use_best_model')
 
     possible_eeg_epochs = ['all', 'spread', 'random']
 
@@ -144,6 +152,10 @@ def get_parameters_from_config(config_path):
         'swag_enabled': swag_enabled,
         'swag_lr': swag_lr,
         'swag_freq': swag_freq,
+        'snapshot_cycle_epochs': snapshot_epochs,
+        'snapshot_num_cycles': snapshot_num_cycles,
+        'snapshot_lr': snapshot_lr,
+        'snapshot_use_best_model': snapshot_use_best_model,
     }
 
     possible_predictions = ('dementia', 'abnormal')

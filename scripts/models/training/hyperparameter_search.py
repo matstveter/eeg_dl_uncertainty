@@ -25,14 +25,14 @@ def generate_data_hyperparameters():
         'learning_rate': random.choice([0.01, 0.001, 0.0001, 0.00001]),
         'cnn_units': random.choice(range(8, 64, 4)),
         'depth': random.choice([2, 3, 4, 5, 6, 9, 12]),
-        'max_kernel_size': random.choice([20, 40, 60, 80, 120]),
+        'max_kernel_size': random.choice([20, 40, 60, 80]),
         'mc_dropout_enabled': random.choice([True, False]),
         'fc_bool': random.choice([True, False]),
         'fc_act': random.choice([True, False]),
         'fc_batch': random.choice([True, False]),
-        'num_seconds': random.choice([5, 10, 15, 20, 30, 40, 50, 60]),
+        'num_seconds': random.choice([5, 10, 30]),
         'age_scaling': random.choice(["min_max", "standard"]),
-        'eeg_epochs': random.choice(['all', 'random', 'spread'])
+        'eeg_epochs': random.choice(['all', 'spread'])
     }
     
     if params['mc_dropout_enabled']:
@@ -173,6 +173,7 @@ def main():
                                      loss_fn=criterion, earlystopping_patience=earlystopping,
                                      val_loader=val_loader, train_hist=train_history, val_history=val_history)
             except torch.cuda.OutOfMemoryError as e:
+                print(param)
                 mlflow.set_tag("Exception", "CUDA Out of Memory Error")
                 mlflow.log_param("Exception Message", str(e))
                 cleanup_function(experiment_path=run_path)

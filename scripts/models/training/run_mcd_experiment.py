@@ -1,4 +1,8 @@
 import matplotlib
+
+from eegDlUncertainty.data.results.ood_exp import ood_experiment
+from eegDlUncertainty.data.results.result_utils import ensemble_performance
+
 matplotlib.use("TkAgg")
 import argparse
 import os
@@ -174,22 +178,23 @@ def main():
                 evaluation_history.save_to_mlflow()
                 evaluation_history.save_to_pickle()
 
-                evaluate_dataset_shifts(model=classifier, test_subjects=val_subjects, dataset=dataset,
-                                        device=device, use_age=use_age, monte_carlo=True, batch_size=batch_size)
+                if use_test_set:
+                    ensemble_performance(classifier, test_loader, device, save_path=experiment_path)
+                    # evaluate_dataset_shifts(model=classifier, test_subjects=test_subjects, dataset=dataset,
+                    #                         device=device, use_age=use_age, batch_size=batch_size,
+                    #                         save_path=run_path)
 
-                # todo Check calibration metrics Brier and ECE
-                # todo Evaluate dataset shifts, performance and calibration
-                # todo Temperature scaling
-                # todo Check calibration metrics Brier and ECE
-                # todo Evaluate dataset shifts, performance and calibration
-                # todo Save history objects, create plots ++
-
-                # todo Test on greek eeg, mpi and tdbrain
-
+                else:
+                    ensemble_performance(classifier, val_loader, device, save_path=experiment_path)
+                #     evaluate_dataset_shifts(model=classifier, test_subjects=val_subjects, dataset=dataset,
+                #                             device=device, use_age=use_age, batch_size=batch_size,
+                #                             save_path=run_path)
+                ood_results = ood_experiment(classifier, dataset_version=dataset_version, num_seconds=num_seconds,
+                                             age_scaling=age_scaling, device=device, batch_size=batch_size,
+                                             save_path=experiment_path)
+                #
             finally:
                 mlflow.end_run()
-
-        # todo Create a figure for all
 
 
 if __name__ == "__main__":
