@@ -2,13 +2,12 @@
     implementation of SWAG
 """
 
-import torch
-import numpy as np
-from torch.distributions.normal import Normal
-
 import gpytorch
-from gpytorch.lazy import RootLazyTensor, DiagLazyTensor, AddedDiagLazyTensor
+import numpy as np
+import torch
 from gpytorch.distributions import MultivariateNormal
+from gpytorch.lazy import AddedDiagLazyTensor, DiagLazyTensor, RootLazyTensor
+from torch.distributions.normal import Normal
 
 
 def flatten(lst):
@@ -46,9 +45,68 @@ def swag_parameters(module, params, no_cov_mat=True):
         params.append((module, name))
 
 
+def _check_bn(module, flag):
+    if issubclass(module.__class__, torch.nn.modules.batchnorm._BatchNorm):
+        flag[0] = True
+
+
+def check_bn(model):
+    flag = [False]
+    model.apply(lambda module: _check_bn(module, flag))
+    return flag[0]
+
+
+def reset_bn(module):
+    if issubclass(module.__class__, torch.nn.modules.batchnorm._BatchNorm):
+        module.running_mean = torch.zeros_like(module.running_mean)
+        module.running_var = torch.ones_like(module.running_var)
+
+
+def _get_momenta(module, momenta):
+    if issubclass(module.__class__, torch.nn.modules.batchnorm._BatchNorm):
+        momenta[module] = module.momentum
+
+
+def _set_momenta(module, momenta):
+    if issubclass(module.__class__, torch.nn.modules.batchnorm._BatchNorm):
+        module.momentum = momenta[module]
+
+
+def bn_update(loader, model, device, **kwargs):
+    """
+        BatchNorm buffers update (if any).
+        Performs 1 epochs to estimate buffers average using train dataset.
+
+        :param loader: train dataset loader for buffers average estimation.
+        :param model: model being update
+        :return: None
+    """
+    if not check_bn(model):
+        return
+    model.train()
+    momenta = {}
+    model.apply(reset_bn)
+    model.apply(lambda module: _get_momenta(module, momenta))
+    n = 0
+
+    with torch.no_grad():
+        for data, _ in loader:
+            inputs = data.to(device)
+            input_var = torch.autograd.Variable(inputs)
+            b = input_var.data.size(0)
+
+            momentum = b / (n + b)
+            for module in momenta.keys():
+                module.momentum = momentum
+
+            model(input_var, **kwargs)
+            n += b
+
+    model.apply(lambda module: _set_momenta(module, momenta))
+
+
 class SWAG(torch.nn.Module):
-    def __init__(
-            self, base, no_cov_mat=True, max_num_models=0, var_clamp=1e-30, *args, **kwargs):
+    def __init__(self, base, no_cov_mat=True, max_num_models=0, var_clamp=1e-30, **kwargs):
         super(SWAG, self).__init__()
 
         self.register_buffer("n_models", torch.zeros([1], dtype=torch.long))
@@ -59,7 +117,7 @@ class SWAG(torch.nn.Module):
 
         self.var_clamp = var_clamp
 
-        self.base = base
+        self.base = base(**kwargs)
         self.base.apply(
             lambda module: swag_parameters(
                 module=module, params=self.params, no_cov_mat=self.no_cov_mat
@@ -162,7 +220,6 @@ class SWAG(torch.nn.Module):
         for (module, name), base_param in zip(self.params, base_model.parameters()):
             mean = module.__getattr__("%s_mean" % name)
             sq_mean = module.__getattr__("%s_sq_mean" % name)
-
 
             # first moment
             mean = mean * self.n_models.item() / (
