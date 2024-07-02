@@ -12,6 +12,8 @@ from torch.nn.modules.loss import _Loss
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from eegDlUncertainty.data.results.history import History, MCHistory
+from eegDlUncertainty.models.classifiers.inceptionTime import InceptionNetwork
+from eegDlUncertainty.models.classifiers.swag import SWAG, bn_update
 from eegDlUncertainty.models.get_models import get_models
 
 
@@ -366,8 +368,8 @@ class MainClassifier(abc.ABC, nn.Module):
 
 
 class MCClassifier(MainClassifier):
-    def get_mc_predictions(self, *, test_loader: DataLoader, device: torch.device, history: MCHistory = None,
-                           num_forward=50):
+    def get_ensemble_predictions(self, *, test_loader: DataLoader, device: torch.device, history=None,
+                                        num_forward=50):
         """
         Generate Monte Carlo predictions from the model by enabling dropout during test time.
         This is often used to obtain the predictive uncertainty estimates from models like Bayesian Neural Networks.
@@ -510,3 +512,118 @@ class SnapshotClassifier(MainClassifier):
                 model_weight_paths.append(path)
 
         return model_weight_paths
+
+
+class SWAGClassifier(MainClassifier):
+
+    def __init__(self, model_name, pretrained: Optional[str] = None, **kwargs):
+        model_kwargs = kwargs.copy()
+        model_kwargs['classifier_name'] = model_name
+        super().__init__(model_name=model_name, pretrained=pretrained, **kwargs)
+        self.swag_model = SWAG(base=InceptionNetwork, max_num_models=kwargs.pop("swag_num_models"),
+                               no_cov_mat=False, **model_kwargs)
+
+    def fit_model(self, *, train_loader: DataLoader, val_loader: DataLoader, training_epochs: int,
+                  device: torch.device, loss_fn: _Loss, train_hist: History, val_history: History,
+                  earlystopping_patience: int, **kwargs):
+
+        optimizer = torch.optim.Adam(self.classifier.parameters(), lr=self._learning_rate)
+        self.to(device)
+
+        swag_start = kwargs.get("swag_start")
+        swag_freq = kwargs.get("swag_freq")
+        swag_lr = kwargs.get("swag_lr")
+        swag_num_models = kwargs.get("swag_num_models")
+
+        num_epochs = swag_start + (swag_freq * swag_num_models)
+
+        for epoch in range(num_epochs):
+
+            print(f"\n-------------------------  EPOCH {epoch + 1} / {num_epochs}  -------------------------")
+            self.train()
+
+            for data, targets in train_loader:
+                inputs, targets = data.to(device), targets.to(device)
+
+                optimizer.zero_grad()
+                outputs = self(inputs)
+                loss = loss_fn(outputs, targets)
+                # Store values in the history object
+                y_pred = self.activation_function(logits=outputs)
+                train_hist.batch_stats(y_pred=y_pred, y_true=targets, loss=loss)
+
+                loss.backward()
+                optimizer.step()
+
+            train_hist.on_epoch_end()
+
+            self.eval()
+            with torch.no_grad():
+                for inputs, targets in val_loader:
+                    inputs, targets = inputs.to(device), targets.to(device)
+                    outputs = self(inputs)
+
+                    val_loss = loss_fn(outputs, targets)
+
+                    # Activation function and store values
+                    y_pred = self.activation_function(logits=outputs)
+                    val_history.batch_stats(y_pred=y_pred, y_true=targets, loss=val_loss)
+                val_history.on_epoch_end()
+
+            # Change to a SGD optimizer with a different learning rate for SWAG training
+            if epoch == swag_start:
+                print("Changing optimizer to SGD for SWAG training")
+                optimizer = torch.optim.SGD(self.classifier.parameters(), lr=swag_lr,
+                                            weight_decay=1e-4)
+
+            if epoch >= swag_start and (epoch - swag_start) % swag_freq == 0:
+                print("Collecting model for SWAG")
+                self.swag_model.collect_model(self.classifier)
+
+        print("Testing the SWAG model")
+        self.swag_model.sample(0.0)
+        bn_update(train_loader, self.swag_model, device=device)
+        with torch.no_grad():
+            for inputs, targets in val_loader:
+                inputs, targets = inputs.to(device), targets.to(device)
+                outputs = self.swag_model(inputs)
+
+                val_loss = loss_fn(outputs, targets)
+
+                # Activation function and store values
+                y_pred = self.activation_function(logits=outputs)
+                val_history.batch_stats(y_pred=y_pred, y_true=targets, loss=val_loss)
+            val_history.on_epoch_end()
+    
+    def get_ensemble_predictions(self,*, test_loader: DataLoader, device: torch.device, history=None, num_forward=50):
+        self.swag_model.to(device)
+
+        logits_per_pass = []
+        target_classes = []
+
+        with torch.no_grad():
+            self.eval()
+
+            for _ in range(num_forward):
+                # Sample swag model
+                output_logits = []
+                predictions = []
+                targets = []
+                self.swag_model.sample(0.0)
+                for inputs, targets_batch in test_loader:
+                    inputs, target_batch = inputs.to(device), targets_batch.to(device)
+                    
+                    outputs = self.swag_model(inputs)
+                    y_pred = self.activation_function(outputs)
+
+                    output_logits.extend(outputs.cpu().numpy())
+                    predictions.extend(y_pred.cpu().numpy())
+                    targets.extend(target_batch.cpu().numpy())
+                    
+                logits_per_pass.append(output_logits)
+                if len(target_classes) == 0:
+                    target_classes = targets
+
+        return np.array(logits_per_pass), np.array(target_classes)
+        
+        
