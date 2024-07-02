@@ -159,7 +159,7 @@ def single_dataset_experiment(model, data_loader, device, dataset_name, save_pat
     targets = None
     if not isinstance(model, list):
         print("Testing with the combined EEG")
-        logits, targets = model.get_mc_predictions(test_loader=data_loader, device=device, history=None,
+        logits, targets = model.get_ensemble_predictions(test_loader=data_loader, device=device, history=None,
                                                    num_forward=50)
     else:
         print("Testing with the ensemble")
@@ -197,6 +197,137 @@ def single_dataset_experiment(model, data_loader, device, dataset_name, save_pat
     return ood_results, ood_predictions
 
 
+def apply_jitter_with_centered_point(df, jitter=0.15):
+    """
+    Apply jitter to all but one point per class in the dataframe to ensure one point remains at the class value.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        containing 'Class' column.
+    jitter : float
+        Amount of random jitter to add to the class labels for better visualization.
+
+    Returns
+    -------
+    df : pd.DataFrame
+        DataFrame with jitter applied to 'Class_Jittered' column.
+    """
+    jittered_classes = df['Class'].copy()
+    for cls in df['Class'].unique():
+        class_indices = df.index[df['Class'] == cls].tolist()
+        if len(class_indices) > 1:
+            jitter_indices = np.random.choice(class_indices, len(class_indices) - 1, replace=False)
+            jittered_classes[jitter_indices] = jittered_classes[jitter_indices] + np.random.uniform(-jitter, jitter,
+                                                                                                    size=len(
+                                                                                                        jitter_indices))
+    df['Class_Jittered'] = jittered_classes
+    return df
+
+
+def all_dataset_scatter_plots(probs_pred_list, target_classes_list, dataset_names, save_path, jitter=0.15):
+    """
+    Creates scatter plots for multiple datasets and combines them into one figure with subplots.
+
+    Parameters
+    ----------
+    probs_pred_list : list of np.ndarray
+        List of arrays with predicted probabilities, each with shape (n_samples, n_classes).
+    target_classes_list : list of np.ndarray
+        List of one-hot encoded arrays of target classes, each with shape (n_samples, n_classes).
+    dataset_names : list of str
+        List of dataset names.
+    save_path : str
+        Directory path where the plot will be saved.
+    jitter : float, optional
+        Amount of random jitter to add to the class labels for better visualization. Default is 0.15.
+
+    Returns
+    -------
+    None
+    """
+    sns.set(style="darkgrid")
+
+    num_datasets = len(probs_pred_list)
+    fig, axes = plt.subplots(1, num_datasets, figsize=(9 * num_datasets, 10), sharey=True)
+
+    for i, (probs_pred, target_classes, dataset_name) in enumerate(
+            zip(probs_pred_list, target_classes_list, dataset_names)):
+        # Calculate the Brier score for each sample
+        brier = np.mean((probs_pred - target_classes) ** 2, axis=1)
+
+        # Get the predicted and true classes
+        predictions = np.argmax(probs_pred, axis=1)
+        true_classes = np.argmax(target_classes, axis=1)
+
+        # Identify correct and incorrect predictions
+        correct_predictions = predictions == true_classes
+
+        # Create a DataFrame for Seaborn
+        data = {
+            'Class': true_classes,
+            'Brier Score': brier,
+            'Correct': np.where(correct_predictions, 'Correct', 'Wrong')
+        }
+        df = pd.DataFrame(data)
+
+        # Apply jitter to all but one point per class
+        df = apply_jitter_with_centered_point(df, jitter)
+
+        sns.scatterplot(x='Class_Jittered', y='Brier Score', hue='Correct', data=df, ax=axes[i],
+                        palette={'Correct': 'green', 'Wrong': 'red'}, legend=True, s=125)
+        max_brier = calculate_max_brier_score(num_classes=probs_pred.shape[1])
+        axes[i].axhline(y=max_brier, color='blue', linestyle='--', label='Max Brier Score')
+        axes[i].set_title(dataset_name, fontsize=TITLE_FONT / 2, weight='bold', color='navy')
+
+        # Dynamically set x-ticks based on present classes
+        present_classes = np.unique(true_classes)
+        present_class_labels = [class_labels[cls] for cls in present_classes]
+
+        axes[i].set_xticks(present_classes)
+        axes[i].set_xticklabels(present_class_labels, fontsize=TICK_FONT)
+
+        # Set x-limits to ensure jitter stays within bounds
+        if len(present_classes) == 1:
+            axes[i].set_xlim(present_classes[0] - jitter, present_classes[0] + jitter)
+        else:
+            axes[i].set_xlim(-0.5, len(class_labels) - 0.5)
+
+        if i == 0:
+            axes[i].set_ylabel("Brier Score", fontsize=LABEL_FONT)
+            # Set y tickfont to be the same as x tickfont
+            axes[i].tick_params(axis='y', labelsize=TICK_FONT)
+        else:
+            axes[i].set_ylabel('')
+
+        axes[i].set_xlabel('')
+        # Add legend values to the figure so that these can be plotted for the large figure
+        axes[i].legend().set_visible(False)
+
+    # Assuming `fig` is your matplotlib figure object
+    lines_labels = [ax.get_legend_handles_labels() for ax in fig.axes]
+    lines, labels = [sum(lol, []) for lol in zip(*lines_labels)]
+
+    # Remove duplicates while preserving order
+    unique_labels = []
+    unique_lines = []
+    for line, label in zip(lines, labels):
+        if label not in unique_labels:
+            unique_labels.append(label)
+            unique_lines.append(line)
+
+    fig.legend(unique_lines, unique_labels, fontsize=TICK_FONT, loc='upper right')
+
+    # Set common labels and title
+    fig.text(0.5, 0.04, 'Class', ha='center', va='center', fontsize=LABEL_FONT)
+    fig.suptitle('Performance vs Uncertainty', fontsize=TITLE_FONT, weight='bold', color='navy', y=1.0)
+
+    # plt.tight_layout() but not on the height
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.savefig(f"{save_path}/OOD.eps", dpi=300, format="eps")
+    plt.show()
+
+
 def ood_experiment(classifiers, dataset_version: int, num_seconds: int, age_scaling: str, device, batch_size: int,
                    save_path: str):
     greek_loader, mpi_loader, tdbrain_loader = get_dataset(dataset_version=dataset_version,
@@ -207,8 +338,8 @@ def ood_experiment(classifiers, dataset_version: int, num_seconds: int, age_scal
     save_path = check_folder(path=save_path, path_ext="figures")
 
     greek_res, greek_pred = single_dataset_experiment(model=classifiers, data_loader=greek_loader, device=device,
-                                                      dataset_name="Greek", save_path=save_path)
-    print("Greek results: ", greek_res)
+                                                      dataset_name="Miltiadous", save_path=save_path)
+    print("Miltiadous results: ", greek_res)
     mpi_res, mpi_pred = single_dataset_experiment(model=classifiers, data_loader=mpi_loader, device=device,
                                                   dataset_name="MPI", save_path=save_path)
     print("MPI results: ", mpi_res)
@@ -220,26 +351,10 @@ def ood_experiment(classifiers, dataset_version: int, num_seconds: int, age_scal
                         'mpi': {'results': mpi_res, 'predictions': mpi_pred},
                         'tdbrain': {'results': tdbrain_res, 'predictions': tdbrain_pred}}
 
-    # todo What to plot?
+    preds_prob_list = [greek_pred["probs"], mpi_pred["probs"], tdbrain_pred["probs"]]
+    targets_list = [greek_pred["target_classes"], mpi_pred["target_classes"], tdbrain_pred["target_classes"]]
+    all_dataset_scatter_plots(probs_pred_list=preds_prob_list, target_classes_list=targets_list,
+                              dataset_names=["Miltiadous", "MPI", "TDBrain"], save_path=save_path)
 
     save_dict_to_pickle(data_dict=combined_results, path=save_path, name="ood_results")
     return combined_results
-
-
-# if __name__ == "__main__":
-#     # Example usage
-#     num_samples = 10
-#     num_classes = 3
-#     # true_labels = [0] * num_samples  # Only the 0th class present
-#     true_labels = [0, 0, 0, 0, 0, 2, 2, 2, 2, 2]
-#
-#     # Generate random probabilities
-#     np.random.seed(0)
-#     probs = np.random.rand(num_samples, num_classes)
-#     probs = probs / np.sum(probs, axis=1, keepdims=True)  # Normalize to sum to 1
-#
-#     # Generate random target classes
-#     # true_labels = np.random.choice(num_classes, num_samples)
-#     target_classes = np.eye(num_classes)[true_labels]  # One-hot encoding
-#
-#     create_scatter_plot(probs, target_classes, dataset_name="Test", save_path=".")

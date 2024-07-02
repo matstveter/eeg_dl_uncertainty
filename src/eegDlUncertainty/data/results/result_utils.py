@@ -22,7 +22,7 @@ def write_metrics_to_file(metrics_majority_vote, metrics_final_classes, file_pat
 
 def ensemble_performance(model, test_loader, device, save_path):
     if not isinstance(model, list):
-        logits, targets = model.get_mc_predictions(test_loader=test_loader, device=device, history=None,
+        logits, targets = model.get_ensemble_predictions(test_loader=test_loader, device=device, history=None,
                                                    num_forward=50)
     else:
         logits = []

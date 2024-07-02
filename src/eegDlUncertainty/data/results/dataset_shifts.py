@@ -61,7 +61,7 @@ def evaluate_shift(shift_type, model, test_subjects, dataset, use_age, device, b
 
         if not isinstance(model, list):
             print("Testing with the combined EEG")
-            logits, targets = model.get_mc_predictions(test_loader=shift_loader, device=device, history=None,
+            logits, targets = model.get_ensemble_predictions(test_loader=shift_loader, device=device, history=None,
                                                        num_forward=50)
         else:
             print("Testing with the ensemble")
