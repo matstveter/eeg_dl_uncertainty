@@ -179,20 +179,21 @@ def main():
 
             finally:
                 mlflow.end_run()
+
         if use_test_set:
             ensemble_performance(classifiers, test_loader, device, save_path=experiment_path)
+            # evaluate_dataset_shifts(model=classifiers, test_subjects=test_subjects, dataset=dataset,
+            #                                             device=device, use_age=use_age, batch_size=batch_size,
+            #                                             save_path=experiment_path)
         else:
             ensemble_performance(classifiers, val_loader, device, save_path=experiment_path)
+            # evaluate_dataset_shifts(model=classifiers, test_subjects=val_subjects, dataset=dataset,
+            #                                             device=device, use_age=use_age, batch_size=batch_size,
+            #                                             save_path=experiment_path)
 
-        evaluate_dataset_shifts(model=classifiers, test_subjects=val_subjects, dataset=dataset,
-                                                    device=device, use_age=use_age, batch_size=batch_size,
-                                                    save_path=experiment_path)
-        # ood_results = ood_experiment(classifiers, dataset_version=dataset_version, num_seconds=num_seconds,
-        #                              age_scaling=age_scaling, device=device, batch_size=batch_size,
-        #                              save_path=experiment_path)
-
-        # todo What to do with plots???
-
+        ood_results = ood_experiment(classifiers, dataset_version=dataset_version, num_seconds=num_seconds,
+                                     age_scaling=age_scaling, device=device, batch_size=batch_size,
+                                     save_path=experiment_path)
 
 if __name__ == "__main__":
     main()
