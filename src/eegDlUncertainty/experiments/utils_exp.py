@@ -109,13 +109,10 @@ def get_parameters_from_config(config_path):
     mc_dropout_enabled: bool = config.get('mc_dropout', {}).get('enabled', False)
     mc_dropout_rate: float = config.get('mc_dropout', {}).get('dropout_rate')
 
-    swa_enabled: bool = config.get('swa', {}).get('enabled', False)
-    swa_lr: float = config.get('swa', {}).get('swa_lr')
-    swa_epochs: int = config.get('swa', {}).get('swa_epochs')
-
-    swag_enabled: bool = config.get('swag', {}).get('enabled', False)
-    swag_lr: float = config.get('swag', {}).get('swag_lr')
-    swag_freq: int = config.get('swag', {}).get('swag_freq')
+    swag_start: int = config.get('swag', {}).get('start')
+    swag_lr: float = config.get('swag', {}).get('lr')
+    swag_freq: int = config.get('swag', {}).get('freq')
+    swag_num_models: int = config.get('swag', {}).get('num_models')
 
     snapshot_epochs: int = config.get('snapshot', {}).get('epochs_per_cycle')
     snapshot_num_cycles: int = config.get('snapshot', {}).get('num_cycles')
@@ -146,12 +143,10 @@ def get_parameters_from_config(config_path):
         'earlystopping': earlystopping,
         'mc_dropout_enabled': mc_dropout_enabled,
         'mc_dropout_rate': mc_dropout_rate,
-        'swa_enabled': swa_enabled,
-        'swa_lr': swa_lr,
-        'swa_epochs': swa_epochs,
-        'swag_enabled': swag_enabled,
+        'swag_start': swag_start,
         'swag_lr': swag_lr,
         'swag_freq': swag_freq,
+        'swag_num_models': swag_num_models,
         'snapshot_cycle_epochs': snapshot_epochs,
         'snapshot_num_cycles': snapshot_num_cycles,
         'snapshot_lr': snapshot_lr,
