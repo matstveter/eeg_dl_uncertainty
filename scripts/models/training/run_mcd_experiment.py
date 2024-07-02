@@ -163,13 +163,13 @@ def main():
                                                  loader_lenght=len(test_loader), save_path=run_path)
                     classifier.test_model(test_loader=test_loader, device=device, test_hist=evaluation_history,
                                           loss_fn=criterion)
-                    classifier.get_mc_predictions(test_loader=test_loader, device=device, history=mc_history)
+                    classifier.get_ensemble_predictions(test_loader=test_loader, device=device, history=mc_history)
                 else:
                     evaluation_history = History(num_classes=dataset.num_classes, set_name="test_val",
                                                  loader_lenght=len(val_loader), save_path=run_path)
                     classifier.test_model(test_loader=val_loader, device=device, test_hist=evaluation_history,
                                           loss_fn=criterion)
-                    classifier.get_mc_predictions(test_loader=val_loader, device=device, history=mc_history)
+                    classifier.get_ensemble_predictions(test_loader=val_loader, device=device, history=mc_history)
 
                 train_history.save_to_mlflow()
                 train_history.save_to_pickle()
