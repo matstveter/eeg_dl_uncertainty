@@ -7,9 +7,6 @@ from torch.utils.data import DataLoader
 
 from eegDlUncertainty.data.data_generators.CauDataGenerator import OODDataGenerator
 from eegDlUncertainty.data.dataset.OODDataset import GreekEEGDataset, MPILemonDataset, TDBrainDataset
-from eegDlUncertainty.data.results.dataset_shifts import activation_function
-from eegDlUncertainty.data.results.uncertainty import calculate_performance_metrics, compute_classwise_uncertainty, \
-    get_uncertainty_metrics
 from eegDlUncertainty.data.utils import save_dict_to_pickle
 from eegDlUncertainty.experiments.utils_exp import check_folder
 
@@ -56,9 +53,10 @@ def create_scatter_plot(probs_pred, target_classes, dataset_name, save_path, jit
     probabilistic predictions. The plot shows the Brier scores for each class, color-coded based on
     whether the predictions are correct or incorrect.
     """
-    # Calculate the Brier score for each sample
-    brier = np.mean((probs_pred - target_classes) ** 2, axis=1)
-
+    try:
+        brier = np.mean((probs_pred - target_classes) ** 2, axis=1)
+    except RuntimeWarning:
+        print("runtime warning, ")
     # Get the predicted and true classes
     predictions = np.argmax(probs_pred, axis=1)
     true_classes = np.argmax(target_classes, axis=1)
@@ -97,7 +95,6 @@ def create_scatter_plot(probs_pred, target_classes, dataset_name, save_path, jit
     plt.tight_layout()
 
     plt.savefig(f"{save_path}/{dataset_name}_OOD.eps", dpi=300, format="eps")
-    plt.show()
 
 
 def get_loaders(dataset, device, batch_size):
@@ -140,7 +137,7 @@ def get_dataset(dataset_version: int, num_seconds: int, age_scaling: str, device
             get_loaders(dataset=tdbrain, device=device, batch_size=batch_size))
 
 
-def single_dataset_experiment(model, data_loader, device, dataset_name, save_path):
+def single_dataset_experiment(ensemble_class, data_loader, device, dataset_name, save_path):
     """
     This function performs an experiment on a single dataset.
 
@@ -155,46 +152,14 @@ def single_dataset_experiment(model, data_loader, device, dataset_name, save_pat
     dict: A dictionary containing the mean logits, all probabilities, probabilities, predictions, and target classes of
     the experiment.
     """
+    results = ensemble_class.ensemble_performance_and_uncertainty(data_loader, device, save_path,
+                                                                  save_name=dataset_name,
+                                                                  save_to_pickle=False, save_to_mlflow=False)
+    predictions = results['predictions']
+    create_scatter_plot(probs_pred=predictions["probs"], target_classes=predictions["target_one_hot"],
+                        dataset_name=dataset_name, save_path=save_path)
 
-    targets = None
-    if not isinstance(model, list):
-        print("Testing with the combined EEG")
-        logits, targets = model.get_ensemble_predictions(test_loader=data_loader, device=device, history=None,
-                                                   num_forward=50)
-    else:
-        print("Testing with the ensemble")
-        logits = []
-        for m in model:
-            ensemble_logits, targets = m.get_predictions(loader=data_loader, device=device)
-            logits.append(ensemble_logits)
-        logits = np.array(logits)  # shape: (num_models, num_samples, num_classes)
-
-    mean_logits = torch.from_numpy(np.mean(logits, axis=0))
-    all_predictions = activation_function(logits=torch.from_numpy(logits), ensemble=True)
-    probs = activation_function(logits=mean_logits, ensemble=False)
-    predictions = activation_function(logits=mean_logits, ensemble=False, ret_prob=False)
-    target_classes = np.argmax(targets, axis=1)
-
-    ood_predictions = {"mean_logits": mean_logits,
-                       "all_probs": all_predictions,
-                       "probs": probs,
-                       "predictions": predictions,
-                       "target_classes": target_classes}
-
-    performance = calculate_performance_metrics(y_pred_prob=probs, y_pred_class=predictions,
-                                                y_true_one_hot=targets, y_true_class=target_classes)
-
-    uncertainty = get_uncertainty_metrics(probs=probs, targets=targets)
-
-    class_uncertainty = compute_classwise_uncertainty(all_probs=all_predictions, mean_probs=probs,
-                                                      one_hot_target=targets, targets=target_classes)
-    create_scatter_plot(probs_pred=probs, target_classes=targets, dataset_name=dataset_name, save_path=save_path)
-
-    ood_results = {"performance": performance,
-                   "uncertainty": uncertainty,
-                   "class_uncertainty": class_uncertainty}
-
-    return ood_results, ood_predictions
+    return results, predictions
 
 
 def apply_jitter_with_centered_point(df, jitter=0.15):
@@ -325,11 +290,10 @@ def all_dataset_scatter_plots(probs_pred_list, target_classes_list, dataset_name
     # plt.tight_layout() but not on the height
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     plt.savefig(f"{save_path}/OOD.eps", dpi=300, format="eps")
-    plt.show()
 
 
-def ood_experiment(classifiers, dataset_version: int, num_seconds: int, age_scaling: str, device, batch_size: int,
-                   save_path: str):
+def ood_exp(ensemble_class, dataset_version: int, num_seconds: int, age_scaling: str, device, batch_size: int,
+            save_path: str):
     greek_loader, mpi_loader, tdbrain_loader = get_dataset(dataset_version=dataset_version,
                                                            num_seconds=num_seconds,
                                                            device=device, batch_size=batch_size,
@@ -337,22 +301,18 @@ def ood_experiment(classifiers, dataset_version: int, num_seconds: int, age_scal
 
     save_path = check_folder(path=save_path, path_ext="figures")
 
-    greek_res, greek_pred = single_dataset_experiment(model=classifiers, data_loader=greek_loader, device=device,
+    greek_res, greek_pred = single_dataset_experiment(ensemble_class=ensemble_class,
+                                                      data_loader=greek_loader, device=device,
                                                       dataset_name="Miltiadous", save_path=save_path)
-    print("Miltiadous results: ", greek_res)
-    mpi_res, mpi_pred = single_dataset_experiment(model=classifiers, data_loader=mpi_loader, device=device,
+    mpi_res, mpi_pred = single_dataset_experiment(ensemble_class=ensemble_class, data_loader=mpi_loader, device=device,
                                                   dataset_name="MPI", save_path=save_path)
-    print("MPI results: ", mpi_res)
-    tdbrain_res, tdbrain_pred = single_dataset_experiment(model=classifiers, data_loader=tdbrain_loader, device=device,
+    tdbrain_res, tdbrain_pred = single_dataset_experiment(ensemble_class=ensemble_class, data_loader=tdbrain_loader,
+                                                          device=device,
                                                           dataset_name="TDBrain", save_path=save_path)
-    print("TDBrain results: ", tdbrain_res)
-
-    combined_results = {'greek': {'results': greek_res, 'predictions': greek_pred},
-                        'mpi': {'results': mpi_res, 'predictions': mpi_pred},
-                        'tdbrain': {'results': tdbrain_res, 'predictions': tdbrain_pred}}
+    combined_results = {'greek': greek_res, 'mpi': mpi_res, 'tdbrain': tdbrain_res}
 
     preds_prob_list = [greek_pred["probs"], mpi_pred["probs"], tdbrain_pred["probs"]]
-    targets_list = [greek_pred["target_classes"], mpi_pred["target_classes"], tdbrain_pred["target_classes"]]
+    targets_list = [greek_pred["target_one_hot"], mpi_pred["target_one_hot"], tdbrain_pred["target_one_hot"]]
     all_dataset_scatter_plots(probs_pred_list=preds_prob_list, target_classes_list=targets_list,
                               dataset_names=["Miltiadous", "MPI", "TDBrain"], save_path=save_path)
 

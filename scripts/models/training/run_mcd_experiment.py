@@ -1,16 +1,14 @@
 import matplotlib
 
-from eegDlUncertainty.data.results.ood_exp import ood_experiment
-from eegDlUncertainty.data.results.result_utils import ensemble_performance
+from eegDlUncertainty.experiments.dataset_shift_experiment import eval_dataset_shifts
+from eegDlUncertainty.experiments.ood_experiments import ood_exp
+from eegDlUncertainty.models.classifiers.ensemble import Ensemble
 
 matplotlib.use("TkAgg")
 import argparse
 import os
-import random
-import sys
 from typing import List, Optional, Union
 import mlflow
-import numpy
 import torch
 from braindecode.augmentation import AugmentedDataLoader
 from torch.utils.data import DataLoader
@@ -18,8 +16,6 @@ from torch.utils.data import DataLoader
 from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
 from eegDlUncertainty.data.data_generators.augmentations import get_augmentations
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
-from eegDlUncertainty.data.dataset.OODDataset import GreekEEGDataset, MPILemonDataset, TDBrainDataset
-from eegDlUncertainty.data.results.dataset_shifts import evaluate_dataset_shifts
 from eegDlUncertainty.data.results.history import History, MCHistory, get_history_objects
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information
 from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \
@@ -66,6 +62,9 @@ def main():
     augmentations: List[Union[str, None]] = parameters.pop("augmentations")
     augmentation_prob: Optional[float] = parameters.pop("augmentation_prob", 0.2)
 
+    mc_dropout_enabled: bool = parameters.pop("mc_dropout_enabled")
+    mc_dropout_rate: float = parameters.pop("mc_dropout_rate")
+
     # Model training
     model_name: str = parameters.get("classifier_name")
     train_epochs: int = parameters.pop("training_epochs")
@@ -75,9 +74,9 @@ def main():
 
     random_state: int = 42
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    random.seed(random_state)
-    numpy.random.seed(random_state)
-    torch.manual_seed(random_state)
+    # random.seed(random_state)
+    # numpy.random.seed(random_state)
+    #torch.manual_seed(random_state)
 
     experiment_path, folder_name = setup_experiment_path(save_path=save_path,
                                                          config_path=config_path,
@@ -138,7 +137,9 @@ def main():
                                "num_classes": dataset.num_classes,
                                "time_steps": dataset.eeg_len,
                                "save_path": run_path,
-                               "learning_rate": learning_rate}
+                               "learning_rate": learning_rate,
+                               "mc_dropout_enabled": mc_dropout_enabled,
+                               "mc_dropout_rate": mc_dropout_rate}
             param.update(hyperparameters)
             add_config_information(config=param, dataset="CAUEEG")
 
@@ -178,21 +179,27 @@ def main():
                 evaluation_history.save_to_mlflow()
                 evaluation_history.save_to_pickle()
 
-                if use_test_set:
-                    ensemble_performance(classifier, test_loader, device, save_path=experiment_path)
-                    # evaluate_dataset_shifts(model=classifier, test_subjects=test_subjects, dataset=dataset,
-                    #                         device=device, use_age=use_age, batch_size=batch_size,
-                    #                         save_path=run_path)
+                ens = Ensemble(classifiers=classifier, device=device)
 
+                if use_test_set:
+                    ens.ensemble_performance_and_uncertainty(data_loader=test_loader, device=device, save_path=run_path,
+                                                             save_to_mlflow=True, save_to_pickle=True,
+                                                             save_name="ensemble_results_test")
+                    eval_dataset_shifts(ensemble_class=ens, test_subjects=test_subjects, dataset=dataset,
+                                        device=device, use_age=use_age, batch_size=batch_size,
+                                        save_path=run_path)
                 else:
-                    ensemble_performance(classifier, val_loader, device, save_path=experiment_path)
-                #     evaluate_dataset_shifts(model=classifier, test_subjects=val_subjects, dataset=dataset,
-                #                             device=device, use_age=use_age, batch_size=batch_size,
-                #                             save_path=run_path)
-                ood_results = ood_experiment(classifier, dataset_version=dataset_version, num_seconds=num_seconds,
-                                             age_scaling=age_scaling, device=device, batch_size=batch_size,
-                                             save_path=experiment_path)
-                #
+                    ens.ensemble_performance_and_uncertainty(data_loader=val_loader, device=device, save_path=run_path,
+                                                             save_to_mlflow=True, save_to_pickle=True,
+                                                             save_name="ensemble_results_val")
+                    eval_dataset_shifts(ensemble_class=ens, test_subjects=val_subjects, dataset=dataset,
+                                        device=device, use_age=use_age, batch_size=batch_size,
+                                        save_path=run_path)
+
+                ood_results = ood_exp(ensemble_class=ens, dataset_version=dataset_version,
+                                      num_seconds=num_seconds,
+                                      age_scaling=age_scaling, device=device, batch_size=batch_size,
+                                      save_path=experiment_path)
             finally:
                 mlflow.end_run()
 

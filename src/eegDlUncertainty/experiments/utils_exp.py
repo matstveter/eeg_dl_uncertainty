@@ -119,6 +119,12 @@ def get_parameters_from_config(config_path):
     snapshot_lr: float = config.get('snapshot', {}).get('start_lr')
     snapshot_use_best_model: bool = config.get('snapshot', {}).get('use_best_model')
 
+    fge_start_epoch: int = config.get('fge', {}).get('start_epoch')
+    fge_num_models: int = config.get('fge', {}).get('num_models')
+    fge_epochs_per_cycle: int = config.get('fge', {}).get('epochs_per_cycle')
+    fge_cycle_start_lr: float = config.get('fge', {}).get('cycle_start_lr')
+    fge_cycle_end_lr: float = config.get('fge', {}).get('cycle_end_lr')
+
     possible_eeg_epochs = ['all', 'spread', 'random']
 
     if eeg_epochs not in possible_eeg_epochs:
@@ -151,6 +157,11 @@ def get_parameters_from_config(config_path):
         'snapshot_num_cycles': snapshot_num_cycles,
         'snapshot_lr': snapshot_lr,
         'snapshot_use_best_model': snapshot_use_best_model,
+        'fge_start_epoch': fge_start_epoch,
+        'fge_num_models': fge_num_models,
+        'fge_epochs_per_cycle': fge_epochs_per_cycle,
+        'fge_cycle_start_lr': fge_cycle_start_lr,
+        'fge_cycle_end_lr': fge_cycle_end_lr,
     }
 
     possible_predictions = ('dementia', 'abnormal')

@@ -3,6 +3,8 @@ import torch
 from torchmetrics.classification import MulticlassCalibrationError
 from sklearn.metrics import roc_auc_score, f1_score, precision_score, recall_score, confusion_matrix, accuracy_score
 
+from eegDlUncertainty.data.results.ece_variations import get_ace, get_ece, get_sce, get_tace
+
 
 def ece(probs, targets, bins=10):
     """
@@ -121,7 +123,7 @@ def compute_classwise_brier(mean_probs, one_hot_target, targets):
         class_wise_brier[targets[i]].append(brier[i])
 
     # Calculate the mean per class
-    return {k: np.mean(v) for k, v in class_wise_brier.items()}
+    return {k: np.mean(v) if len(v) > 0 else np.nan for k, v in class_wise_brier.items()}
 
 
 def compute_classwise_predictive_entropy(mean_probs, targets):
@@ -131,7 +133,7 @@ def compute_classwise_predictive_entropy(mean_probs, targets):
         class_wise_PE[targets[i]].append(entropies[i])
 
     # Calculate the mean per class
-    return {k: np.mean(v) for k, v in class_wise_PE.items()}
+    return {k: np.mean(v) if len(v) > 0 else np.nan for k, v in class_wise_PE.items()}
 
 
 def compute_classwise_variance(all_probs, targets):
@@ -162,7 +164,7 @@ def compute_classwise_variance(all_probs, targets):
         class_wise_variance[targets[i]].append(variance[i][targets[i]])
 
     # Calculate the mean per class
-    return {k: np.mean(v) for k, v in class_wise_variance.items()}
+    return {k: np.mean(v) if len(v) > 0 else np.nan for k, v in class_wise_variance.items()}
 
 
 def compute_classwise_uncertainty(all_probs, mean_probs, one_hot_target, targets):
@@ -179,7 +181,14 @@ def calculate_performance_metrics(y_pred_prob, y_pred_class, y_true_one_hot, y_t
 
     return {'accuracy': accuracy_score(y_true=y_true_class, y_pred=y_pred_class),
             'precision': precision_score(y_true=y_true_class, y_pred=y_pred_class, average="weighted", zero_division=0),
-            'recall': recall_score(y_true=y_true_class, y_pred=y_pred_class, average="weighted"),
-            'f1': f1_score(y_true=y_true_class, y_pred=y_pred_class, average="weighted"),
+            'recall': recall_score(y_true=y_true_class, y_pred=y_pred_class, average="weighted", zero_division=0),
+            'f1': f1_score(y_true=y_true_class, y_pred=y_pred_class, average="weighted", zero_division=0),
             'auc': auc,
             'confusion_matrix': confusion_matrix(y_true=y_true_class, y_pred=y_pred_class)}
+
+
+def get_more_metrics(preds, targets):
+    print(get_ece(preds=preds, targets=targets))
+    print(get_sce(preds=preds, targets=targets))
+    print(get_tace(preds=preds, targets=targets))
+    print(get_ace(preds=preds, targets=targets))

@@ -101,7 +101,6 @@ class BaseDataset(abc.ABC):
         class_labels = np.array([self._labels[sub]['class_label'] for sub in self._subjects])
         class_labels = np.repeat(class_labels, self._num_epochs)
         class_labels: numpy.ndarray = torch.nn.functional.one_hot(torch.from_numpy(class_labels), num_classes=3).numpy()
-        print(class_labels)
         return class_labels
 
     def load_ages(self, add_noise=False):

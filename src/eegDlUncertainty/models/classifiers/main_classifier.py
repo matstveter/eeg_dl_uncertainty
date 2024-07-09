@@ -369,7 +369,7 @@ class MainClassifier(abc.ABC, nn.Module):
 
 class MCClassifier(MainClassifier):
     def get_ensemble_predictions(self, *, test_loader: DataLoader, device: torch.device, history=None,
-                                        num_forward=50):
+                                 num_forward=50):
         """
         Generate Monte Carlo predictions from the model by enabling dropout during test time.
         This is often used to obtain the predictive uncertainty estimates from models like Bayesian Neural Networks.
@@ -396,13 +396,6 @@ class MCClassifier(MainClassifier):
 
         After predictions, the model is used to compute metrics which are then printed. This function does not
         return any values directly, but rather outputs through side effects (printing).
-
-        Examples
-        --------
-        >>> model = MyModel()
-        >>> t_loader = DataLoader(my_dataset, batch_size=10)
-        >>> devi = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        >>> model.get_mc_predictions(test_loader=t_loader, device=devi, num_forward=100)
         """
         self.to(device)
         with torch.no_grad():
@@ -440,6 +433,21 @@ class MCClassifier(MainClassifier):
             history.calculate_metrics()
         else:
             return np.array(logits_per_pass), np.array(target_classes)
+    
+    def forward_ensemble(self, x: torch.Tensor, num_sampling=5):
+        with torch.no_grad():
+            self.eval()
+            for m in self.modules():
+                if isinstance(m, nn.Dropout):
+                    m.train()
+
+            # Sample the model num_sampling times
+            logits = []
+            for _ in range(num_sampling):
+                # Append the logits to a list
+                logits.append(self(x))
+
+        return torch.stack(logits)
 
 
 class SnapshotClassifier(MainClassifier):
@@ -502,7 +510,6 @@ class SnapshotClassifier(MainClassifier):
                     best_model_path = os.path.join(self._model_path, f"snapshot_{cycle}_model")
                     self.classifier.save(path=best_model_path)
 
-            # Todo Why not save the best mode within each cycle?
             if best_model_path and use_best:
                 # save the abs path to the models making it easier to load it later...
                 model_weight_paths.append(best_model_path)
@@ -510,6 +517,105 @@ class SnapshotClassifier(MainClassifier):
                 path = os.path.join(self._model_path, f"snapshot_{cycle}_model")
                 self.classifier.save(path=path)
                 model_weight_paths.append(path)
+
+        return model_weight_paths
+
+
+class FGEClassifier(MainClassifier):
+
+    @staticmethod
+    def cyclic_learning_rate(epoch, cycle, alpha_1, alpha_2):
+        t = (epoch % cycle) / cycle
+        if t < 0.5:
+            return alpha_1 * (1.0 - 2.0 * t) + alpha_2 * 2.0 * t
+        else:
+            return alpha_1 * (2.0 * t - 1.0) + alpha_2 * (2.0 - 2.0 * t)
+    
+    def fit_model(self, *, train_loader: DataLoader, val_loader: DataLoader, training_epochs: int,
+                  device: torch.device, loss_fn: _Loss, train_hist: object, val_history: object,
+                  earlystopping_patience: int, **kwargs):
+
+        pretrain_epochs = kwargs.pop("fge_start_epoch")
+        epochs_per_cycle = kwargs.pop("fge_epochs_per_cycle")
+        cycle_start_lr = kwargs.pop("fge_cycle_start_lr")
+        cycle_end_lr = kwargs.pop("fge_cycle_end_lr")
+        num_models = kwargs.pop("fge_num_models")
+
+        num_epochs = pretrain_epochs + (epochs_per_cycle * num_models)
+        optimizer = torch.optim.Adam(self.classifier.parameters(), lr=self._learning_rate)
+        self.to(device)
+        model_weight_paths = []
+
+        # Pretraining Phase
+        for epoch in range(pretrain_epochs):
+            print(f"\n--- PRETRAIN EPOCH {epoch + 1} / {pretrain_epochs} ---")
+            self.train()
+            for data, targets in train_loader:
+                inputs, targets = data.to(device), targets.to(device)
+                optimizer.zero_grad()
+                outputs = self(inputs)
+                loss = loss_fn(outputs, targets)
+
+                y_pred = self.activation_function(logits=outputs)
+                train_hist.batch_stats(y_pred=y_pred, y_true=targets, loss=loss)
+
+                loss.backward()
+                optimizer.step()
+
+            train_hist.on_epoch_end()
+
+            self.eval()
+            with torch.no_grad():
+                for inputs, targets in val_loader:
+                    inputs, targets = inputs.to(device), targets.to(device)
+                    outputs = self(inputs)
+
+                    val_loss = loss_fn(outputs, targets)
+
+                    y_pred = self.activation_function(logits=outputs)
+                    val_history.batch_stats(y_pred=y_pred, y_true=targets, loss=val_loss)
+                val_history.on_epoch_end()
+
+        # Fast-Geometric Ensemble Phase
+        for epoch in range(pretrain_epochs, num_epochs):
+            lr = self.cyclic_learning_rate(epoch=epoch - pretrain_epochs, cycle=epochs_per_cycle, 
+                                           alpha_1=cycle_start_lr, alpha_2=cycle_end_lr)
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = lr
+            print(f"\n--- EPOCH {epoch + 1} / {num_epochs} --- LR: {lr}")
+            self.train()
+            for data, targets in train_loader:
+                inputs, targets = data.to(device), targets.to(device)
+                optimizer.zero_grad()
+                outputs = self(inputs)
+                loss = loss_fn(outputs, targets)
+
+                y_pred = self.activation_function(logits=outputs)
+                train_hist.batch_stats(y_pred=y_pred, y_true=targets, loss=loss)
+
+                loss.backward()
+                optimizer.step()
+
+            train_hist.on_epoch_end()
+
+            self.eval()
+            with torch.no_grad():
+                for inputs, targets in val_loader:
+                    inputs, targets = inputs.to(device), targets.to(device)
+                    outputs = self(inputs)
+
+                    val_loss = loss_fn(outputs, targets)
+
+                    y_pred = self.activation_function(logits=outputs)
+                    val_history.batch_stats(y_pred=y_pred, y_true=targets, loss=val_loss)
+                val_history.on_epoch_end()
+
+            # At halfway through the cycle, save the model weights
+            if (epoch - pretrain_epochs) % epochs_per_cycle == epochs_per_cycle // 2:
+                path = os.path.join(self._model_path, f"FGE_cycle_{epoch}_model")
+                torch.save(self.classifier.state_dict(), path)
+                model_weight_paths.append(path)
+                print("\nModel saved at epoch", epoch + 1, " lr_schedule: ", lr)
 
         return model_weight_paths
 
@@ -581,8 +687,12 @@ class SWAGClassifier(MainClassifier):
                 self.swag_model.collect_model(self.classifier)
 
         print("Testing the SWAG model")
+        path = os.path.join(self._model_path, f"{self._name}_last_model")
         self.swag_model.sample(0.0)
         bn_update(train_loader, self.swag_model, device=device)
+        # self.swag_model.save(path=path)
+        self.save_hyperparameters()
+
         with torch.no_grad():
             for inputs, targets in val_loader:
                 inputs, targets = inputs.to(device), targets.to(device)
@@ -594,8 +704,8 @@ class SWAGClassifier(MainClassifier):
                 y_pred = self.activation_function(logits=outputs)
                 val_history.batch_stats(y_pred=y_pred, y_true=targets, loss=val_loss)
             val_history.on_epoch_end()
-    
-    def get_ensemble_predictions(self,*, test_loader: DataLoader, device: torch.device, history=None, num_forward=50):
+
+    def get_ensemble_predictions(self, *, test_loader: DataLoader, device: torch.device, history=None, num_forward=50):
         self.swag_model.to(device)
 
         logits_per_pass = []
@@ -609,21 +719,30 @@ class SWAGClassifier(MainClassifier):
                 output_logits = []
                 predictions = []
                 targets = []
-                self.swag_model.sample(0.0)
+                self.swag_model.sample()
                 for inputs, targets_batch in test_loader:
                     inputs, target_batch = inputs.to(device), targets_batch.to(device)
-                    
+
                     outputs = self.swag_model(inputs)
                     y_pred = self.activation_function(outputs)
 
                     output_logits.extend(outputs.cpu().numpy())
                     predictions.extend(y_pred.cpu().numpy())
                     targets.extend(target_batch.cpu().numpy())
-                    
+
                 logits_per_pass.append(output_logits)
                 if len(target_classes) == 0:
                     target_classes = targets
 
         return np.array(logits_per_pass), np.array(target_classes)
-        
-        
+
+    def forward_ensemble(self, x: torch.Tensor, num_sampling=5):
+        self.eval()  # Ensure the model is in evaluation mode
+        logits = []
+
+        with torch.no_grad():  # Disable gradient calculation
+            for _ in range(num_sampling):
+                self.swag_model.sample()  # Sample from the SWAG model
+                
+                logits.append(self.swag_model(x))  # Append the logits to the list
+        return torch.stack(logits)  # Stack the logits into a single tensor

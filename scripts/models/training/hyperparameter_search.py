@@ -23,7 +23,7 @@ def generate_data_hyperparameters():
     random.seed()
     params = {
         'learning_rate': random.choice([0.01, 0.001, 0.0001, 0.00001]),
-        'cnn_units': random.choice(range(8, 64, 4)),
+        'cnn_units': random.choice(range(32, 128, 4)),
         'depth': random.choice([2, 3, 4, 5, 6, 9, 12]),
         'max_kernel_size': random.choice([20, 40, 60, 80]),
         'mc_dropout_enabled': random.choice([True, False]),
@@ -159,6 +159,7 @@ def main():
                                "time_steps": dataset.eeg_len,
                                "save_path": run_path,
                                "learning_rate": learning_rate}
+            hyperparameters.update(gen_params)
             param.update(hyperparameters)
             add_config_information(config=param, dataset="CAUEEG")
 
@@ -178,7 +179,7 @@ def main():
                 mlflow.log_param("Exception Message", str(e))
                 cleanup_function(experiment_path=run_path)
                 print(f"Cuda Out Of Memory -> Cleanup -> Error message: {e}")
-                break
+                continue
             else:
                 if use_test_set:
                     evaluation_history = History(num_classes=dataset.num_classes, set_name="test",

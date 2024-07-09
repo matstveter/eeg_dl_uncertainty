@@ -1,14 +1,14 @@
 import matplotlib
 
-from eegDlUncertainty.data.results.ood_exp import ood_experiment
-from eegDlUncertainty.data.results.result_utils import ensemble_performance
+from eegDlUncertainty.experiments.dataset_shift_experiment import eval_dataset_shifts
+from eegDlUncertainty.models.classifiers.ensemble import Ensemble
+
 # from eegDlUncertainty.models.classifiers.swag_classifier import SWAGClassifier
 
 matplotlib.use("TkAgg")
 import argparse
 import os
 import random
-import sys
 from typing import List, Optional, Union
 import mlflow
 import numpy
@@ -19,14 +19,12 @@ from torch.utils.data import DataLoader
 from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
 from eegDlUncertainty.data.data_generators.augmentations import get_augmentations
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
-from eegDlUncertainty.data.dataset.OODDataset import GreekEEGDataset, MPILemonDataset, TDBrainDataset
-from eegDlUncertainty.data.results.dataset_shifts import evaluate_dataset_shifts
-from eegDlUncertainty.data.results.history import History, MCHistory, get_history_objects
+from eegDlUncertainty.data.results.history import History, get_history_objects
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information
 from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \
     prepare_experiment_environment, \
     setup_experiment_path
-from eegDlUncertainty.models.classifiers.main_classifier import MCClassifier, SWAGClassifier
+from eegDlUncertainty.models.classifiers.main_classifier import SWAGClassifier
 
 
 def main():
@@ -183,17 +181,26 @@ def main():
                 val_history.save_to_pickle()
                 evaluation_history.save_to_mlflow()
                 evaluation_history.save_to_pickle()
-                # if use_test_set:
-                #     ensemble_performance(classifier, test_loader, device, save_path=experiment_path)
-                #     # evaluate_dataset_shifts(model=classifier, test_subjects=test_subjects, dataset=dataset,
-                #     #                         device=device, use_age=use_age, batch_size=batch_size,
-                #     #                         save_path=run_path)
-                #
-                # else:
-                #     ensemble_performance(classifier, val_loader, device, save_path=experiment_path)
-                # #     evaluate_dataset_shifts(model=classifier, test_subjects=val_subjects, dataset=dataset,
-                # #                             device=device, use_age=use_age, batch_size=batch_size,
-                # #                             save_path=run_path)
+                
+                ens = Ensemble(classifiers=classifier, device=device)
+
+                if use_test_set:
+                    ens.ensemble_performance_and_uncertainty(data_loader=test_loader, device=device, save_path=run_path,
+                                                             save_to_mlflow=True, save_to_pickle=True,
+                                                             save_name="ensemble_results_test")
+                    eval_dataset_shifts(ensemble_class=ens, test_subjects=test_subjects, dataset=dataset,
+                                        device=device, use_age=use_age, batch_size=batch_size,
+                                        save_path=run_path)
+                else:
+                    ens.ensemble_performance_and_uncertainty(data_loader=val_loader, device=device, save_path=run_path,
+                                                             save_to_mlflow=True, save_to_pickle=True,
+                                                             save_name="ensemble_results_val")
+                    eval_dataset_shifts(ensemble_class=ens, test_subjects=val_subjects, dataset=dataset,
+                                        device=device, use_age=use_age, batch_size=batch_size,
+                                        save_path=run_path)
+
+
+
                 # ood_results = ood_experiment(classifier, dataset_version=dataset_version, num_seconds=num_seconds,
                 #                              age_scaling=age_scaling, device=device, batch_size=batch_size,
                 #                              save_path=experiment_path)

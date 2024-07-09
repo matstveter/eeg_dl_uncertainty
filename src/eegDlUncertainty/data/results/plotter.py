@@ -185,7 +185,7 @@ def create_plot(x, y, y_label, title, file_name, color="darkgreen"):
     plt.ylabel(y_label, fontsize=LABEL_FONT)
     plt.xticks(x, fontsize=TICK_FONT)
     plt.yticks(fontsize=TICK_FONT)
-    plt.legend(fontsize=TICK_FONT)
+    # plt.legend(fontsize=TICK_FONT)
     plt.tight_layout()
     plt.savefig(file_name, dpi=300, format="eps")
 

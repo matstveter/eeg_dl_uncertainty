@@ -1,3 +1,4 @@
+import warnings
 from typing import Optional, Tuple
 
 import mne.io
@@ -18,7 +19,6 @@ class EEGDatashiftGenerator(Dataset):
         self._eeg_info = dataset.eeg_info
         self._use_notch = False
 
-        print(kwargs)
         self._scalar_multi = kwargs.pop("scalar_multi", 1.5)
         self._phase_shift = kwargs.pop("phase_shift", np.pi / 4)
         self._gaussian_std = kwargs.pop("gaussian_std", 0.1)
@@ -303,13 +303,18 @@ class EEGDatashiftGenerator(Dataset):
         # Initialize an array to store the altered EEG data
         altered_array = np.zeros_like(data)
 
-        print(channels_to_interpolate)
         # Loop through each subject's data and interpolate bad channels
         for i, sub in enumerate(data):
-            raw = mne.io.RawArray(sub, info_object, verbose=False)
-            raw.info['bads'] = channels_to_interpolate
-            raw.interpolate_bads(verbose=False, method="MNE")
-            altered_array[i] = raw.get_data()
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", FutureWarning)
+                    raw = mne.io.RawArray(sub, info_object, verbose=False)
+                    raw.info['bads'] = channels_to_interpolate
+                    raw.interpolate_bads(verbose=False, method="MNE")
+                    altered_array[i] = raw.get_data()
+            except FutureWarning:
+                # This block may not be necessary as the warning is suppressed
+                pass
 
         return altered_array
 

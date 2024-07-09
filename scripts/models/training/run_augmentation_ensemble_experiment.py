@@ -6,8 +6,8 @@ from typing import List, Optional, Union
 import mlflow
 import numpy
 import torch
-from braindecode.augmentation import AugmentedDataLoader
 from torch.utils.data import DataLoader
+from braindecode.augmentation import AugmentedDataLoader
 
 from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
 from eegDlUncertainty.data.data_generators.augmentations import get_augmentations
@@ -23,7 +23,7 @@ from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
 
 
 def main():
-    experiment = "weight_ensemble"
+    experiment = "augmentation_ensemble"
     #########################################################################################################
     # Get arguments and read config file
     #########################################################################################################
@@ -94,6 +94,7 @@ def main():
         criterion = torch.nn.BCEWithLogitsLoss()
     else:
         criterion = torch.nn.CrossEntropyLoss()
+
     #########################################################################################################
     # Generators
     #########################################################################################################
@@ -105,15 +106,13 @@ def main():
     #########################################################################################################
     # Loaders
     #########################################################################################################
-
-    if augmentations:
-        train_augmentations = get_augmentations(aug_names=augmentations, probability=augmentation_prob,
-                                                random_state=random_state)
-        # noinspection PyTypeChecker
-        train_loader = AugmentedDataLoader(dataset=train_gen, transforms=train_augmentations, device=device,
-                                           batch_size=batch_size, shuffle=True)
-    else:
-        train_loader = DataLoader(train_gen, batch_size=batch_size, shuffle=True)
+    train_loader_list = []
+    num_augmentations = ['timereverse', 'signflip', 'ftsurrogate', 'channelsshuffle',
+                         'channelsdropout', 'smoothtimemask', 'bandstopfilter']
+    for aug in num_augmentations:
+        train_augmentations = get_augmentations(aug_names=[aug], probability=0.5, random_state=random_state)
+        train_loader_list.append(AugmentedDataLoader(dataset=train_gen, transforms=train_augmentations, device=device,
+                                                     batch_size=batch_size, shuffle=True))
 
     val_loader = DataLoader(val_gen, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_gen, batch_size=batch_size, shuffle=False)
@@ -123,20 +122,21 @@ def main():
 
     with mlflow.start_run(run_name=folder_name):
         # Setup MLFLOW experiment
-        # seeds = [0, 1, 42, 123, 456, 789]
-        seeds = [0, 1]
         classifiers = []
 
-        for run_id in range(len(seeds)):
-            torch.manual_seed(seeds[run_id])
+        for run_id in range(len(train_loader_list)):
+            train_loader = train_loader_list[run_id]
 
+            # Setting depth and cnn units to half of the standard to have simpler base models
             mlflow.start_run(run_name=f"{experiment}_{str(run_id)}", nested=True)
             run_path = create_run_folder(path=experiment_path, index=str(run_id))
             hyperparameters = {"in_channels": dataset.num_channels,
                                "num_classes": dataset.num_classes,
                                "time_steps": dataset.eeg_len,
                                "save_path": run_path,
-                               "learning_rate": learning_rate}
+                               "learning_rate": learning_rate,
+                               "depth": 3,
+                               "cnn_units": 16}
             param.update(hyperparameters)
             add_config_information(config=param, dataset="CAUEEG")
 
@@ -179,6 +179,7 @@ def main():
                 mlflow.end_run()
 
         ens = Ensemble(classifiers=classifiers, device=device)
+
         if use_test_set:
             ens.ensemble_performance_and_uncertainty(data_loader=test_loader, device=device, save_path=run_path,
                                                      save_to_mlflow=True, save_to_pickle=True,
