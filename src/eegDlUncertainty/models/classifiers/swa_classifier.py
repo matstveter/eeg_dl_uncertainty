@@ -54,5 +54,5 @@ class SWAClassifier(nn.Module):
         # Update batch normalization statistics for the SWA model
         torch.optim.swa_utils.update_bn(train_loader, swa_model, device=device)
         self.model.load_state_dict(mapping_avg_state_dict(averaged_model_state_dict=swa_model.state_dict()))
-        path = os.path.join(self._model_path, f"swa_model")
+        path = os.path.join(self._model_path, "swa_model")
         self.model.save_model(path=path)

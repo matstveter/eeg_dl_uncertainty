@@ -41,9 +41,9 @@ class BaseDataset(abc.ABC):
             self._labels = self._read_label_file(path=os.path.join(config['label_dir'], "participants.tsv"))
 
             if self.__class__.__name__ == "TDBrainDataset":
-                prep_path = os.path.join(self._dataset_path, f"data_processing_tdbrain.json")
+                prep_path = os.path.join(self._dataset_path, "data_processing_tdbrain.json")
             else:
-                prep_path = os.path.join(self._dataset_path, f"data_processing_greek_eeg.json")
+                prep_path = os.path.join(self._dataset_path, "data_processing_greek_eeg.json")
 
         self._preprocessing = self._read_config(prep_path)['preprocessing']
         self._ageScaler = None

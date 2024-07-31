@@ -2,7 +2,6 @@ import json
 import os
 from typing import Any, Dict, List, Tuple
 
-import mlflow
 import numpy
 import mne
 import numpy as np
@@ -15,7 +14,7 @@ from eegDlUncertainty.data.dataset.misc_classes import AgeScaler, verify_split_s
 class CauEEGDataset:
 
     def __init__(self, *, dataset_version, targets: str, eeg_len_seconds: int,
-                 epochs: str, overlapping_epochs: bool, use_predefined_split: bool = True,
+                 epochs: str, overlapping_epochs: bool, save_dir: str, use_predefined_split: bool = True,
                  num_channels: int = 19, age_scaling="Standard"):
         # Read in the dataset config
         config = self._read_config(json_path=os.path.join(os.path.dirname(__file__), "dataset_config.json"))
@@ -27,6 +26,7 @@ class CauEEGDataset:
 
         self._task_name = loaded_dict['task_name']
         self._class_name_to_label = loaded_dict['class_name_to_label']
+        self._save_dir = save_dir
 
         # Prediction related
         self._name = "CAUEEG"
@@ -68,6 +68,7 @@ class CauEEGDataset:
         if epochs == "all":
             self._epochs = int(maximum_epochs)
         else:
+            # In the case of spread or random the number of epochs is set to half of the maximum
             self._epochs = int(maximum_epochs / 2)
 
         self._epoch_structure = epochs
@@ -316,7 +317,7 @@ class CauEEGDataset:
 
         return train_subjects, val_subjects, test_subjects
 
-    def load_targets(self, subjects: Tuple[str, ...], split=None) -> numpy.ndarray:  # type: ignore[type-arg, return]
+    def load_targets(self, subjects: Tuple[str, ...], split, get_stats=False) -> numpy.ndarray:  # type: ignore[type-arg, return]
         """
         Load target class labels for a given set of subjects based on the current task.
 
@@ -365,14 +366,14 @@ class CauEEGDataset:
             class_labels = np.repeat(class_labels, self._epochs)
 
         if self._task_name == 'CAUEEG-Abnormal benchmark':
-            if split:
+            if get_stats:
                 self.get_label_statistics(class_labels=class_labels, classes={"0": 'Normal', "1": 'Abnormal'},
                                           split=split)
             return class_labels
         elif self._task_name == 'CAUEEG-Dementia benchmark':
             class_labels: numpy.ndarray = torch.nn.functional.one_hot(  # type: ignore[type-arg]
                 torch.from_numpy(class_labels), num_classes=len(self._class_name_to_label)).numpy()
-            if split:
+            if get_stats:
                 self.get_label_statistics(class_labels=class_labels,
                                           classes={"0": "Normal", "1": "MCI", "2": "Dementia"},
                                           split=split)
@@ -577,8 +578,7 @@ class CauEEGDataset:
             sfreq = 200  # From the paper
         return mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types="eeg")
 
-    @staticmethod
-    def get_label_statistics(class_labels, classes, split):
+    def get_label_statistics(self, class_labels, classes, split):
         """
         Calculate and log statistics for given class labels within a dataset split.
 
@@ -632,7 +632,10 @@ class CauEEGDataset:
             # print(f"{split.upper()} - {class_name.upper()}:\n\tCount: {count}\n\tPropo: {proportion:.2f}")
             stats[f"{class_name.upper()}"] = f" count: {count}, %: {proportion}"
 
-        try:
-            mlflow.log_param(f"Class Statistics - {split.upper()}", stats)
-        except mlflow.exceptions.MlflowException:
-            print("MLFlowException: Overlapping values, will happen in bagging_ensemble, but not a problem. Skipping.")
+        # Append the test to the file
+        path = os.path.join(self._save_dir, "split_statistics.txt")
+
+        with open(path, "a") as file:
+            for key, value in stats.items():
+                file.write(f"{split.upper()}\t --> {key}\t: {value}\n")
+            file.write("\n")

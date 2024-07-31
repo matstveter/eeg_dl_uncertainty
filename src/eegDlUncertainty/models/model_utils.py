@@ -6,7 +6,7 @@ import mlflow
 from eegDlUncertainty.experiments.utils_exp import check_folder
 
 
-def calculate_metrics(all_pred: np.ndarray, all_targets: np.ndarray, save_path) -> dict:
+def calculate_metrics(all_pred: np.ndarray, all_targets: np.ndarray, save_path: str) -> dict:
     save_path = check_folder(save_path, path_ext="figures")
     # Variance
     pred_variance = np.var(all_pred, axis=0)

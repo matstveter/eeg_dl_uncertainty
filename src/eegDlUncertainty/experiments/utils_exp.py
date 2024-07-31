@@ -1,7 +1,7 @@
 import json
 import shutil
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import List, Optional
 import os
 import mlflow
 
@@ -103,6 +103,7 @@ def get_parameters_from_config(config_path):
     learning_rate: float = float(config.get('hyperparameters', {}).get('learning_rate'))
     batch_size: int = config.get('hyperparameters', {}).get('batch_size')
     augmentations: Optional[List[str]] = config.get('hyperparameters', {}).get('augmentations')
+    augment_prob: float = config.get('hyperparameters', {}).get('augment_prob')
     training_epochs: int = config.get('model', {}).get('epochs')
     earlystopping: int = config.get('model', {}).get('earlystopping')
 
@@ -145,6 +146,7 @@ def get_parameters_from_config(config_path):
         'learning_rate': learning_rate,
         'batch_size': batch_size,
         'augmentations': augmentations,
+        'augment_prob': augment_prob,
         'training_epochs': training_epochs,
         'earlystopping': earlystopping,
         'mc_dropout_enabled': mc_dropout_enabled,

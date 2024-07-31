@@ -1,6 +1,7 @@
 import matplotlib
 
 from eegDlUncertainty.experiments.dataset_shift_experiment import eval_dataset_shifts
+from eegDlUncertainty.experiments.ood_experiments import ood_exp
 from eegDlUncertainty.models.classifiers.ensemble import Ensemble
 
 # from eegDlUncertainty.models.classifiers.swag_classifier import SWAGClassifier
@@ -94,7 +95,8 @@ def main():
     # Dataset
     #########################################################################################################
     dataset = CauEEGDataset(dataset_version=dataset_version, targets=prediction, eeg_len_seconds=num_seconds,
-                            epochs=eeg_epochs, overlapping_epochs=overlapping_epochs, age_scaling=age_scaling)
+                            epochs=eeg_epochs, overlapping_epochs=overlapping_epochs, age_scaling=age_scaling,
+                            save_dir=experiment_path)
     train_subjects, val_subjects, test_subjects = dataset.get_splits()
 
     if "test" in config_path:
@@ -130,8 +132,9 @@ def main():
     val_loader = DataLoader(val_gen, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_gen, batch_size=batch_size, shuffle=False)
 
-    if mlflow.active_run() is not None:
-        mlflow.end_run()
+    #########################################################################################################
+    # Run experiment
+    #########################################################################################################
 
     with mlflow.start_run(run_name=folder_name):
         # Setup MLFLOW experiment
@@ -152,12 +155,15 @@ def main():
             train_history, val_history = get_history_objects(train_loader=train_loader, val_loader=val_loader,
                                                              save_path=save_path, num_classes=dataset.num_classes)
             try:
-                model_weight_list = classifier.fit_model(train_loader=train_loader, training_epochs=train_epochs, device=device,
-                                     loss_fn=criterion, earlystopping_patience=earlystopping,
-                                     val_loader=val_loader, train_hist=train_history, val_history=val_history,
-                                     fge_start_epoch=fge_start_epoch, fge_num_models=fge_num_models,
-                                     fge_epochs_per_cycle=fge_epochs_per_cycle, fge_cycle_start_lr=fge_cycle_start_lr,
-                                     fge_cycle_end_lr=fge_cycle_end_lr)
+                model_weight_list = classifier.fit_model(train_loader=train_loader, training_epochs=train_epochs,
+                                                         device=device,
+                                                         loss_fn=criterion, earlystopping_patience=earlystopping,
+                                                         val_loader=val_loader, train_hist=train_history,
+                                                         val_history=val_history,
+                                                         fge_start_epoch=fge_start_epoch, fge_num_models=fge_num_models,
+                                                         fge_epochs_per_cycle=fge_epochs_per_cycle,
+                                                         fge_cycle_start_lr=fge_cycle_start_lr,
+                                                         fge_cycle_end_lr=fge_cycle_end_lr)
             except torch.cuda.OutOfMemoryError as e:
                 mlflow.set_tag("Exception", "CUDA Out of Memory Error")
                 mlflow.log_param("Exception Message", str(e))
@@ -176,7 +182,7 @@ def main():
                 # Load all the models from the weigh lists
                 for m_weights in model_weight_list:
                     classifiers.append(FGEClassifier(model_name=model_name, pretrained=m_weights,
-                                                          **hyperparameters))
+                                                     **hyperparameters))
 
                 # For each classifier, test the model and save the history
                 for i, cl in enumerate(classifiers):
@@ -196,7 +202,7 @@ def main():
 
             finally:
                 mlflow.end_run()
-            
+
             ens = Ensemble(classifiers=classifiers, device=device)
 
             if use_test_set:
@@ -213,12 +219,11 @@ def main():
                 eval_dataset_shifts(ensemble_class=ens, test_subjects=val_subjects, dataset=dataset,
                                     device=device, use_age=use_age, batch_size=batch_size,
                                     save_path=run_path)
-            
-            # ood_results = ood_experiment(classifiers, dataset_version=dataset_version, num_seconds=num_seconds,
-            #                              age_scaling=age_scaling, device=device, batch_size=batch_size,
-            #                              save_path=experiment_path)
-            #
-            #
+
+            ood_exp(ensemble_class=ens, dataset_version=dataset_version,
+                    num_seconds=num_seconds,
+                    age_scaling=age_scaling, device=device, batch_size=batch_size,
+                    save_path=experiment_path)
 
 
 if __name__ == "__main__":

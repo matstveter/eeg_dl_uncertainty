@@ -98,7 +98,8 @@ def main():
             # Dataset
             #########################################################################################################
             dataset = CauEEGDataset(dataset_version=dataset_version, targets=prediction, eeg_len_seconds=num_seconds,
-                                    epochs=eeg_epochs, overlapping_epochs=overlapping_epochs, age_scaling=age_scaling)
+                                    epochs=eeg_epochs, overlapping_epochs=overlapping_epochs, age_scaling=age_scaling,
+                                    save_dir=run_path)
             train_subjects, val_subjects, test_subjects = dataset.get_splits()
 
             if "test" in config_path:

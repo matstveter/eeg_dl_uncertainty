@@ -1,0 +1,25 @@
+{
+  "test_with_test_set": false,
+  "result_folder": "/home/tvetern/PhD/dl_uncertainty/results",
+  "model": {
+    "name": "InceptionNetwork",
+    "epochs": 500, 
+    "earlystopping": 150
+  },
+  "hyperparameters": {
+    "learning_rate": 0.0001,
+    "batch_size": 64,
+    "augmentations": [],
+    "augment_prob": 0.1
+  },
+  "data": {
+    "prediction": "dementia",
+    "overlap": false,
+    "version": 1,
+    "eeg_epochs": "spread", 
+    "overlapping_epochs": false,
+    "use_age": true, 
+    "age_scaling": "min_max",
+    "num_seconds": 30
+  }
+}

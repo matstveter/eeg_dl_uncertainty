@@ -17,7 +17,7 @@ class CauDataGenerator(Dataset):  # type: ignore[type-arg]
         else:
             self.ages = torch.tensor(dataset.load_ages(subjects=subjects), dtype=torch.float32)
         self._x = torch.tensor(dataset.load_eeg_data(subjects=subjects, split=split), dtype=torch.float32)
-        targets = torch.tensor(dataset.load_targets(subjects=subjects, split=split), dtype=torch.float32)
+        targets = torch.tensor(dataset.load_targets(subjects=subjects, split=split, get_stats=True), dtype=torch.float32)
 
         if len(targets.shape) == 1:
             targets = targets.unsqueeze(1)

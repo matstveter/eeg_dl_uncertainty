@@ -3,7 +3,7 @@ import torch
 from torchmetrics.classification import MulticlassCalibrationError
 
 
-def get_ece(preds, targets, n_bins=15, **args):
+def get_ece(preds, targets, n_bins=10, **args):
     metric = MulticlassCalibrationError(num_classes=3, n_bins=n_bins, norm="l1")
     if targets.shape[1] == 3:
         targets = np.argmax(targets, axis=1)
@@ -39,7 +39,7 @@ def get_sce(preds, targets, n_bins=15, **args):
     return res
 
 
-def get_tace(preds, targets, n_bins=15, threshold=1e-3, **args):
+def get_tace(preds, targets, n_bins=10, threshold=1e-3, **args):
     n_objects, n_classes = preds.shape
 
     res = 0.0
@@ -71,5 +71,5 @@ def get_tace(preds, targets, n_bins=15, threshold=1e-3, **args):
     return res
 
 
-def get_ace(preds, targets, n_bins=15, **args):
+def get_ace(preds, targets, n_bins=10, **args):
     return get_tace(preds, targets, n_bins, threshold=0)

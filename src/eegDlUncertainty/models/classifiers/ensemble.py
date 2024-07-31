@@ -1,4 +1,5 @@
-import numpy as np
+from typing import List
+
 import torch
 import mlflow
 
@@ -20,12 +21,13 @@ class Ensemble(torch.nn.Module):
 
         self.temperature = torch.nn.Parameter(torch.ones(1))
 
+        print(self.temperature)
+
     def forward(self, x, apply_mean=True):
         """ Forward pass of the ensemble model. The output is the average of the logits of the classifiers.
             If the model is either swag or MCD, it uses the forward_ensemble method of the classifier.
-            
             It divides the output by the temperature parameter.
-        
+
         Parameters
         ----------
         apply_mean
@@ -51,7 +53,9 @@ class Ensemble(torch.nn.Module):
             logits = self.classifiers.forward_ensemble(x)
 
         if apply_mean:
-            return torch.mean(logits, dim=0) / self.temperature
+            logits = torch.mean(logits, dim=0)
+            temperature = self.temperature.unsqueeze(1).expand(logits.size(0), logits.size(1))
+            return logits / temperature
         else:
             return logits
 
@@ -61,26 +65,38 @@ class Ensemble(torch.nn.Module):
     def predict_prob(self, x: torch.Tensor):
         return self.activation_function(logits=self.forward(x), ret_prob=True)
 
-    def set_temperature_scale_ensemble(self, data_loader, device, criterion):
+    def set_temperature_scale_ensemble(self, data_loader, device, criterion, patience=250):
         self.eval()
         self.to(device)
+        # Setting this to 1.5 based on the original paper
+        self.temperature.data.fill_(1.5)
         self.temperature.to(device)
 
-        optimizer = torch.optim.LBFGS([self.temperature], lr=0.001, max_iter=1000)
+        logits_list = []
+        labels_list = []
+
+        with torch.no_grad():
+            for data, labels in data_loader:
+                data, labels = data.to(device), labels.to(device)
+                logits = self(data)
+                logits_list.append(logits)
+                labels_list.append(labels)
+            logits = torch.cat(logits_list)
+            labels = torch.cat(labels_list)
+
+        optimizer = torch.optim.LBFGS([self.temperature], lr=0.001, max_iter=500)
 
         def evaluation():
-            loss = 0
-            with torch.no_grad():
-                for data, labels in data_loader:
-                    data, labels = data.to(device), labels.to(device)
+            optimizer.zero_grad()
+            temp = self.temperature.unsqueeze(1).expand(logits.size(0), logits.size(1))
+            loss = criterion(logits / temp, labels)
+            loss.backward()
+            return loss
 
-                    logits = self.forward(data)
+        optimizer.step(lambda: evaluation())
 
-                    loss += criterion(logits, labels).item()
-            return loss / len(data_loader)
-
-        optimizer.step(lambda: -evaluation())
-        mlflow.log_metric(f"Optimal temperature ensemble: ", self.temperature.item())
+        print("Temperature: ", self.temperature.item())
+        mlflow.log_metric("optimal_temp_ensemble", self.temperature.item())
 
     def test_ensemble(self, data_loader, device, loss_fn, test_history):
         self.to(device)
@@ -104,8 +120,8 @@ class Ensemble(torch.nn.Module):
         probs = []
         predictions = []
         all_predictions = []
-        target_one_hot = []
-        target_class = []
+        target_one_hot: List[torch.Tensor] = []
+        target_class: List[torch.Tensor] = []
         with torch.no_grad():
             self.eval()
             for inputs, tar in data_loader:

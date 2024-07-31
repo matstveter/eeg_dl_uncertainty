@@ -6,7 +6,6 @@ from typing import Any, Dict, Tuple, Union
 
 import mne
 import numpy as np
-import openneuro
 import pandas as pd
 
 from eegDlUncertainty.data.utils import read_eeg_file, read_json_file
@@ -255,7 +254,7 @@ def process_eeg_file(sub_eeg, eeg_path, events, preprocess, nyquist, out_p):
     total_time = end_time - start_time
 
     if total_time < preprocess['num_seconds_per_subject']:
-        print(f"Data is too short, skipping")
+        print("Data is too short, skipping")
         return
 
     raw_eeg_data.crop(tmin=start_time, tmax=end_time, verbose=False, include_tmax=False)
@@ -521,4 +520,3 @@ def create_MPI_dataset(config, conf_path):
         else:
             print(f"Missing participant: {sub}")
     shutil.copy(src=conf_path, dst=outp_path)
-

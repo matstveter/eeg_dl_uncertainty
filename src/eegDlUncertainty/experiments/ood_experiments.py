@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-import torch
 import seaborn as sns
 from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader
@@ -80,7 +79,7 @@ def create_scatter_plot(probs_pred, target_classes, dataset_name, save_path, jit
                     palette={'Correct': 'green', 'Wrong': 'red'}, legend='full', s=125)
     # Draw a horizontal line for the maximum Brier score
     max_brier = calculate_max_brier_score(num_classes=probs_pred.shape[1])
-    plt.axhline(y=max_brier, color='blue', linestyle='--', label=f'Max Brier Score')
+    plt.axhline(y=max_brier, color='blue', linestyle='--', label='Max Brier Score')
 
     plt.xlabel("Class", fontsize=LABEL_FONT)
 
@@ -153,8 +152,8 @@ def single_dataset_experiment(ensemble_class, data_loader, device, dataset_name,
     the experiment.
     """
     results = ensemble_class.ensemble_performance_and_uncertainty(data_loader, device, save_path,
-                                                                  save_name=dataset_name,
-                                                                  save_to_pickle=False, save_to_mlflow=False)
+                                                                  save_name=f"OOD_{dataset_name}",
+                                                                  save_to_pickle=True, save_to_mlflow=True)
     predictions = results['predictions']
     create_scatter_plot(probs_pred=predictions["probs"], target_classes=predictions["target_one_hot"],
                         dataset_name=dataset_name, save_path=save_path)
@@ -271,7 +270,7 @@ def all_dataset_scatter_plots(probs_pred_list, target_classes_list, dataset_name
 
     # Assuming `fig` is your matplotlib figure object
     lines_labels = [ax.get_legend_handles_labels() for ax in fig.axes]
-    lines, labels = [sum(lol, []) for lol in zip(*lines_labels)]
+    lines, labels = [sum(lol, []) for lol in zip(*lines_labels)] # ignore [var-annotated]
 
     # Remove duplicates while preserving order
     unique_labels = []

@@ -15,6 +15,7 @@ from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
 from eegDlUncertainty.data.results.history import History, get_history_objects
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information
 from eegDlUncertainty.experiments.dataset_shift_experiment import eval_dataset_shifts
+from eegDlUncertainty.experiments.ood_experiments import ood_exp
 from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \
     prepare_experiment_environment, \
     setup_experiment_path
@@ -88,7 +89,8 @@ def main():
     # Dataset
     #########################################################################################################
     dataset = CauEEGDataset(dataset_version=dataset_version, targets=prediction, eeg_len_seconds=num_seconds,
-                            epochs=eeg_epochs, overlapping_epochs=overlapping_epochs, age_scaling=age_scaling)
+                            epochs=eeg_epochs, overlapping_epochs=overlapping_epochs, age_scaling=age_scaling,
+                            save_dir=experiment_path)
     train_subjects, val_subjects, test_subjects = dataset.get_splits()
 
     if "test" in config_path:
@@ -124,8 +126,9 @@ def main():
     val_loader = DataLoader(val_gen, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_gen, batch_size=batch_size, shuffle=False)
 
-    if mlflow.active_run() is not None:
-        mlflow.end_run()
+    #########################################################################################################
+    # Run experiment
+    #########################################################################################################
 
     with mlflow.start_run(run_name=folder_name):
         # Setup MLFLOW experiment
@@ -178,7 +181,7 @@ def main():
 
                 # For each classifier, test the model and save the history
                 for i, cl in enumerate(classifiers):
-                    print(f"Testing classifier {i+1} of {len(classifiers)}. ")
+                    print(f"Testing classifier {i + 1} of {len(classifiers)}. ")
                     if use_test_set:
                         evaluation_history = History(num_classes=dataset.num_classes, set_name=f"test_{i}",
                                                      loader_lenght=len(test_loader), save_path=run_path)
@@ -212,11 +215,11 @@ def main():
                                     device=device, use_age=use_age, batch_size=batch_size,
                                     save_path=run_path)
 
-            # ood_results = ood_experiment(classifiers, dataset_version=dataset_version, num_seconds=num_seconds,
-            #                              age_scaling=age_scaling, device=device, batch_size=batch_size,
-            #                              save_path=experiment_path)
-            #
-            #
+            ood_exp(ensemble_class=ens, dataset_version=dataset_version,
+                    num_seconds=num_seconds,
+                    age_scaling=age_scaling, device=device, batch_size=batch_size,
+                    save_path=experiment_path)
+
 
 if __name__ == "__main__":
     main()

@@ -1,3 +1,5 @@
+from typing import Dict, List
+
 import numpy as np
 import torch
 from torchmetrics.classification import MulticlassCalibrationError
@@ -28,7 +30,7 @@ def ece(probs, targets, bins=10):
     -------
 
     """
-    metric = MulticlassCalibrationError(num_classes=3, n_bins=10, norm="l1")
+    metric = MulticlassCalibrationError(num_classes=3, n_bins=bins, norm="l1")
 
     if targets.shape[1] == 3:
         targets = np.argmax(targets, axis=1)
@@ -39,14 +41,13 @@ def ece(probs, targets, bins=10):
 def mce(probs, targets, bins=10):
     """
     From: https://github.com/centerforaisafety/Intro_to_ML_Safety/blob/master/Interpretable%20Uncertainty/main.md
-    
+
     The Maximum Calibration Error (MCE) is similar to ECE but meant for much more sensitive domains
     (Naeini, Cooper, and Hauskrecht 2015). Like ECE, we partition the interval up into bins. However,
     instead of taking a weighted average of calibration score over bins, we take the maximum calibration
     error over bins. In other words MCE aims to reduce the calibration error of the worst bin, with the
     intuition that this prevents catastrophic failure cases while giving up some efficacy on more mundane cases.
 
-    $$MCE = \max_{m ∈ {1, ..., M}}|acc(B_m) − conf(B_m)|$$
 
     Like ECE, MCE ranges between 0 and 1, with lower scores being better. MCE is much less common than ECE.
     Quickly eyeballing some results gives us that a model with an MCE of 0.1 can be considered strong (Guo et al. 2017).
@@ -65,16 +66,6 @@ def mce(probs, targets, bins=10):
 def nll(probs, targets):
     """
     From: https://github.com/centerforaisafety/Intro_to_ML_Safety/blob/master/Interpretable%20Uncertainty/main.md
-    
-    The likelihood of a dataset is the probability that a model assigns to the entire dataset. It is defined as follows:
-
-    $$Likelihood = \prod_{x, y ∼ \mathcal{D}}p(y|x)$$
-
-    for p(y|x) our classifier. For numerical stability reasons, it’s common practice to take the negative
-    log likelihood (NLL) defined as follows:
-
-    $$NLL =  − \sum_{x, y ∼ \mathcal{D}}log p(y|x)$$
-
     Negative log likelihood (or cross-entropy loss) is commonly used for maximizing predictive accuracy.
     However, NLL is also useful for calibration as well; a classic result in statistics shows that NLL is
     minimized precisely when p(y|x) matches the true probability distribution π(y|x)
@@ -93,7 +84,6 @@ def nll(probs, targets):
 def brier_score(probs, targets):
     """
     From: https://github.com/centerforaisafety/Intro_to_ML_Safety/blob/master/Interpretable%20Uncertainty/main.md
-    
     Finally, brier score is a common way to measure the accuracy of probability estimates,
     historically used in measuring forecasting accuracy (Brier 1950).
     It is equivalent to measuring the mean squared error of the probability, as follows.
@@ -101,7 +91,7 @@ def brier_score(probs, targets):
     Brier score is used in many real-world applications, such as assessing weather, sports, or political predictions.
     Brier score is a “strictly proper scoring rule,” meaning that one can uniquely maximize one’s score by predicting
     the true probabilities. Brier score ranges between 0 and 1, with an optimal model having a score of 0.
-    
+
     Returns
     -------
     """
@@ -115,10 +105,28 @@ def get_uncertainty_metrics(probs, targets):
             'mce': mce(probs=probs, targets=targets).numpy().item()}
 
 
-def compute_classwise_brier(mean_probs, one_hot_target, targets):
+def compute_classwise_brier(mean_probs: np.ndarray, one_hot_target: np.ndarray, targets: np.ndarray):
+    """ Compute the Brier score for each class.
+
+    Parameters
+    ----------
+    mean_probs: np.ndarray
+        mean probabilities for each subject
+    one_hot_target: np.ndarray
+        one hot encoded targets
+    targets: np.ndarray
+        true class labels for each sample
+
+    Returns
+    -------
+    dict
+        A dictionary where the keys are the class labels (0, 1, 2) and the values are the mean Brier score
+        for that class.
+
+    """
     brier = np.mean((mean_probs - one_hot_target) ** 2, axis=1)
 
-    class_wise_brier = {0: [], 1: [], 2: []}
+    class_wise_brier: Dict[int, List[float]] = {0: [], 1: [], 2: []}
     for i in range(len(targets)):
         class_wise_brier[targets[i]].append(brier[i])
 
@@ -128,7 +136,7 @@ def compute_classwise_brier(mean_probs, one_hot_target, targets):
 
 def compute_classwise_predictive_entropy(mean_probs, targets):
     entropies = - np.sum(mean_probs * np.log(mean_probs + 1e-10), axis=1)
-    class_wise_PE = {0: [], 1: [], 2: []}
+    class_wise_PE: Dict[int, List[float]] = {0: [], 1: [], 2: []}
     for i in range(len(targets)):
         class_wise_PE[targets[i]].append(entropies[i])
 
@@ -159,7 +167,7 @@ def compute_classwise_variance(all_probs, targets):
     """
     variance = np.var(all_probs, axis=0)
 
-    class_wise_variance = {0: [], 1: [], 2: []}
+    class_wise_variance: Dict[int, List[float]] = {0: [], 1: [], 2: []}
     for i in range(len(targets)):
         class_wise_variance[targets[i]].append(variance[i][targets[i]])
 
@@ -190,5 +198,5 @@ def calculate_performance_metrics(y_pred_prob, y_pred_class, y_true_one_hot, y_t
 def get_more_metrics(preds, targets):
     print(get_ece(preds=preds, targets=targets))
     print(get_sce(preds=preds, targets=targets))
-    print(get_tace(preds=preds, targets=targets))
+    print(get_tace(preds=preds, targets=targets, threshold=0.1))
     print(get_ace(preds=preds, targets=targets))

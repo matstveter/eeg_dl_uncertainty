@@ -1,4 +1,7 @@
+import random
+
 import matplotlib
+import numpy
 
 from eegDlUncertainty.experiments.dataset_shift_experiment import eval_dataset_shifts
 from eegDlUncertainty.experiments.ood_experiments import ood_exp
@@ -74,9 +77,9 @@ def main():
 
     random_state: int = 42
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # random.seed(random_state)
-    # numpy.random.seed(random_state)
-    #torch.manual_seed(random_state)
+    random.seed(random_state)
+    numpy.random.seed(random_state)
+    torch.manual_seed(random_state)
 
     experiment_path, folder_name = setup_experiment_path(save_path=save_path,
                                                          config_path=config_path,
@@ -87,7 +90,8 @@ def main():
     # Dataset
     #########################################################################################################
     dataset = CauEEGDataset(dataset_version=dataset_version, targets=prediction, eeg_len_seconds=num_seconds,
-                            epochs=eeg_epochs, overlapping_epochs=overlapping_epochs, age_scaling=age_scaling)
+                            epochs=eeg_epochs, overlapping_epochs=overlapping_epochs, age_scaling=age_scaling,
+                            save_dir=experiment_path)
     train_subjects, val_subjects, test_subjects = dataset.get_splits()
 
     if "test" in config_path:
@@ -123,8 +127,9 @@ def main():
     val_loader = DataLoader(val_gen, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_gen, batch_size=batch_size, shuffle=False)
 
-    if mlflow.active_run() is not None:
-        mlflow.end_run()
+    #########################################################################################################
+    # Run experiment
+    #########################################################################################################
 
     with mlflow.start_run(run_name=folder_name):
         # Setup MLFLOW experiment
@@ -157,51 +162,40 @@ def main():
                 print(f"Cuda Out Of Memory -> Cleanup -> Error message: {e}")
                 break
             else:
-                mc_history = MCHistory(num_classes=dataset.num_classes, save_path=run_path)
-
-                if use_test_set:
-                    evaluation_history = History(num_classes=dataset.num_classes, set_name="test",
-                                                 loader_lenght=len(test_loader), save_path=run_path)
-                    classifier.test_model(test_loader=test_loader, device=device, test_hist=evaluation_history,
-                                          loss_fn=criterion)
-                    classifier.get_ensemble_predictions(test_loader=test_loader, device=device, history=mc_history)
-                else:
-                    evaluation_history = History(num_classes=dataset.num_classes, set_name="test_val",
-                                                 loader_lenght=len(val_loader), save_path=run_path)
-                    classifier.test_model(test_loader=val_loader, device=device, test_hist=evaluation_history,
-                                          loss_fn=criterion)
-                    classifier.get_ensemble_predictions(test_loader=val_loader, device=device, history=mc_history)
-
                 train_history.save_to_mlflow()
                 train_history.save_to_pickle()
                 val_history.save_to_mlflow()
                 val_history.save_to_pickle()
-                evaluation_history.save_to_mlflow()
-                evaluation_history.save_to_pickle()
 
-                ens = Ensemble(classifiers=classifier, device=device)
-
-                if use_test_set:
-                    ens.ensemble_performance_and_uncertainty(data_loader=test_loader, device=device, save_path=run_path,
-                                                             save_to_mlflow=True, save_to_pickle=True,
-                                                             save_name="ensemble_results_test")
-                    eval_dataset_shifts(ensemble_class=ens, test_subjects=test_subjects, dataset=dataset,
-                                        device=device, use_age=use_age, batch_size=batch_size,
-                                        save_path=run_path)
-                else:
-                    ens.ensemble_performance_and_uncertainty(data_loader=val_loader, device=device, save_path=run_path,
-                                                             save_to_mlflow=True, save_to_pickle=True,
-                                                             save_name="ensemble_results_val")
-                    eval_dataset_shifts(ensemble_class=ens, test_subjects=val_subjects, dataset=dataset,
-                                        device=device, use_age=use_age, batch_size=batch_size,
-                                        save_path=run_path)
-
-                ood_results = ood_exp(ensemble_class=ens, dataset_version=dataset_version,
-                                      num_seconds=num_seconds,
-                                      age_scaling=age_scaling, device=device, batch_size=batch_size,
-                                      save_path=experiment_path)
             finally:
                 mlflow.end_run()
+
+            ens = Ensemble(classifiers=classifier, device=device)
+
+            if use_test_set:
+                ens.ensemble_performance_and_uncertainty(data_loader=test_loader, device=device, save_path=run_path,
+                                                         save_to_mlflow=True, save_to_pickle=True,
+                                                         save_name="ensemble_results_test")
+                # eval_dataset_shifts(ensemble_class=ens, test_subjects=test_subjects, dataset=dataset,
+                #                     device=device, use_age=use_age, batch_size=batch_size,
+                #                     save_path=run_path)
+            else:
+                ens.ensemble_performance_and_uncertainty(data_loader=val_loader, device=device, save_path=run_path,
+                                                         save_to_mlflow=True, save_to_pickle=True,
+                                                         save_name="ensemble_results_val")
+                ens.set_temperature_scale_ensemble(data_loader=val_loader, device=device, criterion=criterion)
+                ens.ensemble_performance_and_uncertainty(data_loader=val_loader, device=device, save_path=run_path,
+                                                         save_to_mlflow=True, save_to_pickle=True,
+                                                         save_name="AFTER_TEMP_ensemble_results_val")
+
+                # eval_dataset_shifts(ensemble_class=ens, test_subjects=val_subjects, dataset=dataset,
+                #                     device=device, use_age=use_age, batch_size=batch_size,
+                #                     save_path=run_path)
+
+            # ood_exp(ensemble_class=ens, dataset_version=dataset_version,
+            #         num_seconds=num_seconds,
+            #         age_scaling=age_scaling, device=device, batch_size=batch_size,
+            #         save_path=experiment_path)
 
 
 if __name__ == "__main__":

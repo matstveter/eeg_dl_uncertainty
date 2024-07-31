@@ -9,10 +9,10 @@ class AgeScaler:
         self._dataset_dict = dataset_dict
         self._scaling_type = scaling_type
 
-        ages = []
+        age_list = []
         for k, v in dataset_dict.items():
-            ages.append(v['age'])
-        ages = np.array(ages)
+            age_list.append(v['age'])
+        ages = np.array(age_list)
 
         self._no_transformation = False
         if scaling_type == "min_max":

@@ -22,7 +22,7 @@ class _InceptionModule(nn.Module):
 
     num_kernel_sizes = 3
 
-    def __init__(self, in_channels: int, units: int, use_bottleneck: bool , max_kernel_size: int,
+    def __init__(self, in_channels: int, units: int, use_bottleneck: bool, max_kernel_size: int,
                  mc_dropout_enabled, mc_dropout_rate, activation: Optional[Callable] = None):
         """
         Initialise

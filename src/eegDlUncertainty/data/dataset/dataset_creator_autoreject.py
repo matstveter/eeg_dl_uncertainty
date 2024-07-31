@@ -76,7 +76,6 @@ def calculate_events(path, sfreq, event_of_interest="Eyes Closed"):
             duration_of_events.append((time - prev_time) / sfreq)
             check_time_to_next = False
             prev_time = 0
-            
     event_id = {
         event_of_interest: 1,
         'Other': 2

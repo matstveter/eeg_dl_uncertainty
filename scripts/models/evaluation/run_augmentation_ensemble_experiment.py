@@ -1,13 +1,12 @@
 import argparse
 import os
 import random
-from typing import List, Optional, Union
 
 import mlflow
 import numpy
 import torch
-from torch.utils.data import DataLoader
 from braindecode.augmentation import AugmentedDataLoader
+from torch.utils.data import DataLoader
 
 from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
 from eegDlUncertainty.data.data_generators.augmentations import get_augmentations
@@ -15,6 +14,7 @@ from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
 from eegDlUncertainty.data.results.history import History, get_history_objects
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information
 from eegDlUncertainty.experiments.dataset_shift_experiment import eval_dataset_shifts
+from eegDlUncertainty.experiments.ood_experiments import ood_exp
 from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \
     prepare_experiment_environment, \
     setup_experiment_path
@@ -56,10 +56,6 @@ def main():
     eeg_epochs: str = parameters.pop("eeg_epochs")
     overlapping_epochs: bool = parameters.pop("epoch_overlap", False)
 
-    # Augmentation related information
-    augmentations: List[Union[str, None]] = parameters.pop("augmentations")
-    augmentation_prob: Optional[float] = parameters.pop("augmentation_prob", 0.2)
-
     # Model training
     model_name: str = parameters.get("classifier_name")
     train_epochs: int = parameters.pop("training_epochs")
@@ -73,6 +69,9 @@ def main():
     numpy.random.seed(random_state)
     torch.manual_seed(random_state)
 
+    # Experiment specific variables
+    augmentation_prob = parameters.pop("augmentation_prob", 0.5)
+
     experiment_path, folder_name = setup_experiment_path(save_path=save_path,
                                                          config_path=config_path,
                                                          experiment=experiment)
@@ -82,7 +81,8 @@ def main():
     # Dataset
     #########################################################################################################
     dataset = CauEEGDataset(dataset_version=dataset_version, targets=prediction, eeg_len_seconds=num_seconds,
-                            epochs=eeg_epochs, overlapping_epochs=overlapping_epochs, age_scaling=age_scaling)
+                            epochs=eeg_epochs, overlapping_epochs=overlapping_epochs, age_scaling=age_scaling,
+                            save_dir=experiment_path)
     train_subjects, val_subjects, test_subjects = dataset.get_splits()
 
     if "test" in config_path:
@@ -110,51 +110,60 @@ def main():
     num_augmentations = ['timereverse', 'signflip', 'ftsurrogate', 'channelsshuffle',
                          'channelsdropout', 'smoothtimemask', 'bandstopfilter']
     for aug in num_augmentations:
-        train_augmentations = get_augmentations(aug_names=[aug], probability=0.5, random_state=random_state)
+        train_augmentations = get_augmentations(aug_names=[aug], probability=augmentation_prob,
+                                                random_state=random_state)
         train_loader_list.append(AugmentedDataLoader(dataset=train_gen, transforms=train_augmentations, device=device,
                                                      batch_size=batch_size, shuffle=True))
 
     val_loader = DataLoader(val_gen, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_gen, batch_size=batch_size, shuffle=False)
 
-    if mlflow.active_run() is not None:
-        mlflow.end_run()
+    #########################################################################################################
+    # Run experiment
+    #########################################################################################################
 
     with mlflow.start_run(run_name=folder_name):
         # Setup MLFLOW experiment
         classifiers = []
 
         for run_id in range(len(train_loader_list)):
+            # Get train loader for current run
             train_loader = train_loader_list[run_id]
-
-            # Setting depth and cnn units to half of the standard to have simpler base models
+            # Setup MLFLOW run
             mlflow.start_run(run_name=f"{experiment}_{str(run_id)}", nested=True)
+            # Create run folder
             run_path = create_run_folder(path=experiment_path, index=str(run_id))
+            # Create a model specific hyperparameter dictionary
             hyperparameters = {"in_channels": dataset.num_channels,
                                "num_classes": dataset.num_classes,
                                "time_steps": dataset.eeg_len,
                                "save_path": run_path,
-                               "learning_rate": learning_rate,
-                               "depth": 3,
-                               "cnn_units": 16}
+                               "learning_rate": learning_rate}
+            # Update the hyperparameter dictionary with the general hyperparameters
             param.update(hyperparameters)
+            # Add the hyperparameters to the MLFLOW run
             add_config_information(config=param, dataset="CAUEEG")
-
+            # Create a classifier object
             classifier = MainClassifier(model_name=model_name, **hyperparameters)
+            # Get history objects
             train_history, val_history = get_history_objects(train_loader=train_loader, val_loader=val_loader,
                                                              save_path=save_path, num_classes=dataset.num_classes)
+            # Try to train the model, catch CUDA out of memory error, mostly used during hyperparameter search
             try:
-                _ = classifier.fit_model(train_loader=train_loader, training_epochs=train_epochs, device=device,
-                                         loss_fn=criterion, earlystopping_patience=earlystopping,
-                                         val_loader=val_loader, train_hist=train_history, val_history=val_history)
+                # Fit the model
+                classifier.fit_model(train_loader=train_loader, training_epochs=train_epochs, device=device,
+                                     loss_fn=criterion, earlystopping_patience=earlystopping,
+                                     val_loader=val_loader, train_hist=train_history, val_history=val_history)
             except torch.cuda.OutOfMemoryError as e:
+                # Log the error message and cleanup the experiment
                 mlflow.set_tag("Exception", "CUDA Out of Memory Error")
                 mlflow.log_param("Exception Message", str(e))
+                # This function deletes the run folder and the MLFLOW run
                 cleanup_function(experiment_path=experiment_path)
                 print(f"Cuda Out Of Memory -> Cleanup -> Error message: {e}")
                 break
             else:
-
+                # Use only test set during the final experiments, else use the validation set
                 if use_test_set:
                     evaluation_history = History(num_classes=dataset.num_classes, set_name="test",
                                                  loader_lenght=len(test_loader), save_path=run_path)
@@ -166,6 +175,7 @@ def main():
                     classifier.test_model(test_loader=val_loader, device=device, test_hist=evaluation_history,
                                           loss_fn=criterion)
 
+                # Save the history objects to MLFLOW and pickle
                 train_history.save_to_mlflow()
                 train_history.save_to_pickle()
                 val_history.save_to_mlflow()
@@ -178,12 +188,18 @@ def main():
             finally:
                 mlflow.end_run()
 
+        # Initialize ensemble model with the trained classifiers
         ens = Ensemble(classifiers=classifiers, device=device)
 
+        # todo Remember to set the temperature scale for the ensemble
+
+        # Use only test set during the final experiments, else use the validation set
         if use_test_set:
+            # Calculate the ensemble performance and uncertainty
             ens.ensemble_performance_and_uncertainty(data_loader=test_loader, device=device, save_path=run_path,
                                                      save_to_mlflow=True, save_to_pickle=True,
                                                      save_name="ensemble_results_test")
+            # Evaluate the dataset shifts
             eval_dataset_shifts(ensemble_class=ens, test_subjects=test_subjects, dataset=dataset,
                                 device=device, use_age=use_age, batch_size=batch_size,
                                 save_path=run_path)
@@ -194,10 +210,11 @@ def main():
             eval_dataset_shifts(ensemble_class=ens, test_subjects=val_subjects, dataset=dataset,
                                 device=device, use_age=use_age, batch_size=batch_size,
                                 save_path=run_path)
-
-        # ood_results = ood_experiment(classifiers, dataset_version=dataset_version, num_seconds=num_seconds,
-        #                              age_scaling=age_scaling, device=device, batch_size=batch_size,
-        #                              save_path=experiment_path)
+        # Run the OOD experiment
+        ood_exp(ensemble_class=ens, dataset_version=dataset_version,
+                num_seconds=num_seconds,
+                age_scaling=age_scaling, device=device, batch_size=batch_size,
+                save_path=experiment_path)
 
 
 if __name__ == "__main__":

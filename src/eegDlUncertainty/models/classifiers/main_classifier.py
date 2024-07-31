@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from torch.nn.modules.loss import _Loss
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
-from eegDlUncertainty.data.results.history import History, MCHistory
+from eegDlUncertainty.data.results.history import History
 from eegDlUncertainty.models.classifiers.inceptionTime import InceptionNetwork
 from eegDlUncertainty.models.classifiers.swag import SWAG, bn_update
 from eegDlUncertainty.models.get_models import get_models
@@ -131,8 +131,11 @@ class MainClassifier(abc.ABC, nn.Module):
                   earlystopping_patience: int, **kwargs):
 
         best_loss = 1_000_000
+
         optimizer = torch.optim.Adam(self.classifier.parameters(), lr=self._learning_rate)
         self.to(device)
+
+        best_path = None
 
         # For earlystopping
         epochs_with_no_improvement = 0
@@ -189,8 +192,9 @@ class MainClassifier(abc.ABC, nn.Module):
         self.classifier.save(path=path)
         self.save_hyperparameters()
 
-        # Set the current model to the best model during training
-        self.classifier = self.classifier.load(path=best_path)
+        if best_path is not None:
+            # Set the current model to the best model during training
+            self.classifier = self.classifier.load(path=best_path)
 
     def test_model(self, *, test_loader: DataLoader, device: torch.device, test_hist: History, loss_fn: _Loss):
         self.to(device)
@@ -368,72 +372,7 @@ class MainClassifier(abc.ABC, nn.Module):
 
 
 class MCClassifier(MainClassifier):
-    def get_ensemble_predictions(self, *, test_loader: DataLoader, device: torch.device, history=None,
-                                 num_forward=50):
-        """
-        Generate Monte Carlo predictions from the model by enabling dropout during test time.
-        This is often used to obtain the predictive uncertainty estimates from models like Bayesian Neural Networks.
 
-        Parameters
-        ----------
-        history: MCHistory
-        test_loader : DataLoader
-            The DataLoader provides batches of test data.
-        device : torch.device
-            The device (e.g., 'cuda' or 'cpu') the model and data should be moved to for computation.
-        num_forward : int, optional
-            The number of forward passes to perform with dropout enabled. Defaults to 50.
-
-        Notes
-        -----
-        This function modifies the model in-place by setting it to evaluation mode and manually turning on
-        the training mode for any dropout layers found in the model. This enables stochastic behaviors, such
-        as dropout during the forward passes, which is crucial for generating multiple predictive outcomes.
-
-        The function collects all predictions and targets from the test loader, performs the specified number
-        of forward passes, and calculates metrics based on these predictions. Each forward pass can potentially
-        lead to different predictions due to the randomness introduced by the dropout layers.
-
-        After predictions, the model is used to compute metrics which are then printed. This function does not
-        return any values directly, but rather outputs through side effects (printing).
-        """
-        self.to(device)
-        with torch.no_grad():
-            self.eval()
-            # Turn on the training mode for modules that is of instance nn.Dropout
-            for m in self.modules():
-                if isinstance(m, nn.Dropout):
-                    m.train()
-
-            logits_per_pass = []
-            target_classes = []
-
-            for _ in range(num_forward):
-                predictions = []
-                output_logits = []
-                targets = []
-                for inputs, targets_batch in test_loader:
-                    inputs, target_batch = inputs.to(device), targets_batch.to(device)
-
-                    outputs = self(inputs)
-                    y_pred = self.activation_function(outputs)
-
-                    output_logits.extend(outputs.cpu().numpy())
-                    predictions.extend(y_pred.cpu().numpy())
-                    targets.extend(target_batch.cpu().numpy())
-
-                if history is not None:
-                    history.on_pass_end(predictions=predictions, labels=targets)
-                else:
-                    logits_per_pass.append(output_logits)
-                    if len(target_classes) == 0:
-                        target_classes = targets
-
-        if history is not None:
-            history.calculate_metrics()
-        else:
-            return np.array(logits_per_pass), np.array(target_classes)
-    
     def forward_ensemble(self, x: torch.Tensor, num_sampling=5):
         with torch.no_grad():
             self.eval()
@@ -530,7 +469,7 @@ class FGEClassifier(MainClassifier):
             return alpha_1 * (1.0 - 2.0 * t) + alpha_2 * 2.0 * t
         else:
             return alpha_1 * (2.0 * t - 1.0) + alpha_2 * (2.0 - 2.0 * t)
-    
+
     def fit_model(self, *, train_loader: DataLoader, val_loader: DataLoader, training_epochs: int,
                   device: torch.device, loss_fn: _Loss, train_hist: object, val_history: object,
                   earlystopping_patience: int, **kwargs):
@@ -578,7 +517,7 @@ class FGEClassifier(MainClassifier):
 
         # Fast-Geometric Ensemble Phase
         for epoch in range(pretrain_epochs, num_epochs):
-            lr = self.cyclic_learning_rate(epoch=epoch - pretrain_epochs, cycle=epochs_per_cycle, 
+            lr = self.cyclic_learning_rate(epoch=epoch - pretrain_epochs, cycle=epochs_per_cycle,
                                            alpha_1=cycle_start_lr, alpha_2=cycle_end_lr)
             for param_group in optimizer.param_groups:
                 param_group['lr'] = lr
@@ -687,7 +626,7 @@ class SWAGClassifier(MainClassifier):
                 self.swag_model.collect_model(self.classifier)
 
         print("Testing the SWAG model")
-        path = os.path.join(self._model_path, f"{self._name}_last_model")
+        # path = os.path.join(self._model_path, f"{self._name}_last_model")
         self.swag_model.sample(0.0)
         bn_update(train_loader, self.swag_model, device=device)
         # self.swag_model.save(path=path)
@@ -705,37 +644,6 @@ class SWAGClassifier(MainClassifier):
                 val_history.batch_stats(y_pred=y_pred, y_true=targets, loss=val_loss)
             val_history.on_epoch_end()
 
-    def get_ensemble_predictions(self, *, test_loader: DataLoader, device: torch.device, history=None, num_forward=50):
-        self.swag_model.to(device)
-
-        logits_per_pass = []
-        target_classes = []
-
-        with torch.no_grad():
-            self.eval()
-
-            for _ in range(num_forward):
-                # Sample swag model
-                output_logits = []
-                predictions = []
-                targets = []
-                self.swag_model.sample()
-                for inputs, targets_batch in test_loader:
-                    inputs, target_batch = inputs.to(device), targets_batch.to(device)
-
-                    outputs = self.swag_model(inputs)
-                    y_pred = self.activation_function(outputs)
-
-                    output_logits.extend(outputs.cpu().numpy())
-                    predictions.extend(y_pred.cpu().numpy())
-                    targets.extend(target_batch.cpu().numpy())
-
-                logits_per_pass.append(output_logits)
-                if len(target_classes) == 0:
-                    target_classes = targets
-
-        return np.array(logits_per_pass), np.array(target_classes)
-
     def forward_ensemble(self, x: torch.Tensor, num_sampling=5):
         self.eval()  # Ensure the model is in evaluation mode
         logits = []
@@ -743,6 +651,9 @@ class SWAGClassifier(MainClassifier):
         with torch.no_grad():  # Disable gradient calculation
             for _ in range(num_sampling):
                 self.swag_model.sample()  # Sample from the SWAG model
-                
                 logits.append(self.swag_model(x))  # Append the logits to the list
         return torch.stack(logits)  # Stack the logits into a single tensor
+
+    def save_swag_model(self):
+        # todo This function need to save swag with all parameters
+        pass

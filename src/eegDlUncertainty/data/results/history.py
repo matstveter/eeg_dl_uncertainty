@@ -1,10 +1,11 @@
 import os.path
 import pickle
 from typing import Any, Dict, List, Optional
-import seaborn as sns
+
+import matplotlib
 import mlflow
 import numpy as np
-import matplotlib
+import seaborn as sns
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt

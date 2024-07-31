@@ -22,21 +22,19 @@ from eegDlUncertainty.models.classifiers.main_classifier import MCClassifier, Ma
 def generate_data_hyperparameters():
     random.seed()
     params = {
-        'learning_rate': random.choice([0.01, 0.001, 0.0001, 0.00001]),
-        'cnn_units': random.choice(range(32, 128, 4)),
-        'depth': random.choice([2, 3, 4, 5, 6, 9, 12]),
-        'max_kernel_size': random.choice([20, 40, 60, 80]),
+        'cnn_units': random.choice(range(50, 120, 10)),
+        'depth': random.choice([3, 4, 5, 6, 7 , 8, 9]),
+        'max_kernel_size': random.choice([40, 50, 60, 70, 80]),
         'mc_dropout_enabled': random.choice([True, False]),
-        'fc_bool': random.choice([True, False]),
         'fc_act': random.choice([True, False]),
         'fc_batch': random.choice([True, False]),
-        'num_seconds': random.choice([5, 10, 30]),
+        'num_seconds': random.choice([5, 10]),
         'age_scaling': random.choice(["min_max", "standard"]),
-        'eeg_epochs': random.choice(['all', 'spread'])
+        'eeg_epochs': random.choice(['all', 'spread']),
     }
     
     if params['mc_dropout_enabled']:
-        temp = {"mc_dropout_rate": random.choice([0.1, 0.25, 0.5])}
+        temp = {"mc_dropout_rate": random.choice([0.2, 0.25, 0.5])}
         params.update(temp)
 
     return params
@@ -82,7 +80,9 @@ def main():
             gen_params = generate_data_hyperparameters()
 
             parameters = get_parameters_from_config(config_path=config_path)
-            mlflow.start_run(run_name=f"dataset_run_{str(i)}", nested=True)
+            mlflow.start_run(
+
+            )
             run_path = create_run_folder(path=experiment_path, index=str(i))
             parameters.update(gen_params)
             param = parameters.copy()
@@ -116,7 +116,8 @@ def main():
             # Dataset
             #########################################################################################################
             dataset = CauEEGDataset(dataset_version=dataset_version, targets=prediction, eeg_len_seconds=num_seconds,
-                                    epochs=eeg_epochs, overlapping_epochs=overlapping_epochs, age_scaling=age_scaling)
+                                    epochs=eeg_epochs, overlapping_epochs=overlapping_epochs, age_scaling=age_scaling,
+                                    save_dir=run_path)
             train_subjects, val_subjects, test_subjects = dataset.get_splits()
 
             if "test" in config_path:
