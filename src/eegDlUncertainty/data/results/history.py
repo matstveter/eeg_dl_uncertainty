@@ -38,6 +38,23 @@ class History:
         self._loader_lenght: int = loader_lenght
         self._save_path = save_path
 
+    def get_history_metric(self, metric_name: str) -> List[float]:
+        """ Returns the values of a specific metric
+
+        This function receives the name of the metric as an argument and returns the list of values of that metric.
+
+        Parameters
+        ----------
+        metric_name: str
+            The name of the metric to return the values of
+
+        Returns
+        -------
+        List[float]
+            The list of values of the metric
+        """
+        return getattr(self, f"_{metric_name}")
+
     @property
     def num_classes(self) -> int:
         """ Property -> returns the number of classes in the prediction

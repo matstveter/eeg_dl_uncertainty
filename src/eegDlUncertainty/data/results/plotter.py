@@ -188,6 +188,7 @@ def create_plot(x, y, y_label, title, file_name, color="darkgreen"):
     # plt.legend(fontsize=TICK_FONT)
     plt.tight_layout()
     plt.savefig(file_name, dpi=300, format="eps")
+    plt.close()
 
 
 def multiple_datashift_plotter(shift_result, save_path):
@@ -215,6 +216,7 @@ def multiple_datashift_plotter(shift_result, save_path):
         plt.legend(fontsize=TICK_FONT)
         plt.tight_layout()
         plt.savefig(f"{save_path}_{p}.eps", format="eps", dpi=300)
+        plt.close()
 
 
 def multiple_runs_plotter(ensemble_names, ensemble_results, save_path):
@@ -263,3 +265,4 @@ def multiple_runs_plotter(ensemble_names, ensemble_results, save_path):
             plt.legend(fontsize=TICK_FONT)
             plt.tight_layout()
             plt.savefig(f"{save_path}_{d_shift}_{p}.eps", format="eps", dpi=300)
+            plt.close()

@@ -63,6 +63,13 @@ def main():
     learning_rate: float = parameters.pop("learning_rate")
     earlystopping: int = parameters.pop("earlystopping")
 
+    # General variables
+    model_p = {
+        'depth': parameters.pop("depth"),
+        'cnn_units': parameters.pop("cnn_units"),
+        'max_kernel_size': parameters.pop("max_kernel_size")
+    }
+
     random_state: int = 42
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     random.seed(random_state)
@@ -139,6 +146,7 @@ def main():
                                "time_steps": dataset.eeg_len,
                                "save_path": run_path,
                                "learning_rate": learning_rate}
+            hyperparameters.update(model_p)
             # Update the hyperparameter dictionary with the general hyperparameters
             param.update(hyperparameters)
             # Add the hyperparameters to the MLFLOW run
@@ -163,25 +171,24 @@ def main():
                 print(f"Cuda Out Of Memory -> Cleanup -> Error message: {e}")
                 break
             else:
-                # Use only test set during the final experiments, else use the validation set
-                if use_test_set:
-                    evaluation_history = History(num_classes=dataset.num_classes, set_name="test",
-                                                 loader_lenght=len(test_loader), save_path=run_path)
-                    classifier.test_model(test_loader=test_loader, device=device, test_hist=evaluation_history,
-                                          loss_fn=criterion)
-                else:
-                    evaluation_history = History(num_classes=dataset.num_classes, set_name="test_val",
+                evaluation_history_val = History(num_classes=dataset.num_classes, set_name="test_val",
                                                  loader_lenght=len(val_loader), save_path=run_path)
-                    classifier.test_model(test_loader=val_loader, device=device, test_hist=evaluation_history,
-                                          loss_fn=criterion)
+                classifier.test_model(test_loader=val_loader, device=device, test_hist=evaluation_history_val,
+                                      loss_fn=criterion)
 
-                # Save the history objects to MLFLOW and pickle
+                evaluation_history_test = History(num_classes=dataset.num_classes, set_name="test",
+                                                  loader_lenght=len(test_loader), save_path=run_path)
+                classifier.test_model(test_loader=test_loader, device=device, test_hist=evaluation_history_test,
+                                      loss_fn=criterion)
+
                 train_history.save_to_mlflow()
                 train_history.save_to_pickle()
                 val_history.save_to_mlflow()
                 val_history.save_to_pickle()
-                evaluation_history.save_to_mlflow()
-                evaluation_history.save_to_pickle()
+                evaluation_history_val.save_to_mlflow()
+                evaluation_history_val.save_to_pickle()
+                evaluation_history_test.save_to_mlflow()
+                evaluation_history_test.save_to_pickle()
 
                 classifiers.append(classifier)
 
@@ -190,26 +197,19 @@ def main():
 
         # Initialize ensemble model with the trained classifiers
         ens = Ensemble(classifiers=classifiers, device=device)
-
-        # todo Remember to set the temperature scale for the ensemble
-
-        # Use only test set during the final experiments, else use the validation set
-        if use_test_set:
-            # Calculate the ensemble performance and uncertainty
-            ens.ensemble_performance_and_uncertainty(data_loader=test_loader, device=device, save_path=run_path,
-                                                     save_to_mlflow=True, save_to_pickle=True,
-                                                     save_name="ensemble_results_test")
-            # Evaluate the dataset shifts
-            eval_dataset_shifts(ensemble_class=ens, test_subjects=test_subjects, dataset=dataset,
-                                device=device, use_age=use_age, batch_size=batch_size,
-                                save_path=run_path)
-        else:
-            ens.ensemble_performance_and_uncertainty(data_loader=val_loader, device=device, save_path=run_path,
-                                                     save_to_mlflow=True, save_to_pickle=True,
-                                                     save_name="ensemble_results_val")
-            eval_dataset_shifts(ensemble_class=ens, test_subjects=val_subjects, dataset=dataset,
-                                device=device, use_age=use_age, batch_size=batch_size,
-                                save_path=run_path)
+        # Set the temperature scale for the ensemble
+        ens.set_temperature_scale_ensemble(data_loader=val_loader, device=device, criterion=criterion)
+        # Test the ensemble model on the validation and test set
+        ens.ensemble_performance_and_uncertainty(data_loader=val_loader, device=device, save_path=run_path,
+                                                 save_to_mlflow=True, save_to_pickle=True,
+                                                 save_name="ensemble_results_val")
+        ens.ensemble_performance_and_uncertainty(data_loader=test_loader, device=device, save_path=run_path,
+                                                 save_to_mlflow=True, save_to_pickle=True,
+                                                 save_name="ensemble_results_test")
+        # Evaluate the dataset shifts on the ensemble model using the test set
+        eval_dataset_shifts(ensemble_class=ens, test_subjects=test_subjects, dataset=dataset,
+                            device=device, use_age=use_age, batch_size=batch_size,
+                            save_path=run_path)
         # Run the OOD experiment
         ood_exp(ensemble_class=ens, dataset_version=dataset_version,
                 num_seconds=num_seconds,

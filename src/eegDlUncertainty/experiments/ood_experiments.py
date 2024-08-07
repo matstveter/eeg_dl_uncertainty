@@ -158,6 +158,7 @@ def single_dataset_experiment(ensemble_class, data_loader, device, dataset_name,
     create_scatter_plot(probs_pred=predictions["probs"], target_classes=predictions["target_one_hot"],
                         dataset_name=dataset_name, save_path=save_path)
 
+    print("Finished with dataset: ", dataset_name)
     return results, predictions
 
 
@@ -293,6 +294,7 @@ def all_dataset_scatter_plots(probs_pred_list, target_classes_list, dataset_name
 
 def ood_exp(ensemble_class, dataset_version: int, num_seconds: int, age_scaling: str, device, batch_size: int,
             save_path: str):
+    print("Running OOD experiment")
     greek_loader, mpi_loader, tdbrain_loader = get_dataset(dataset_version=dataset_version,
                                                            num_seconds=num_seconds,
                                                            device=device, batch_size=batch_size,

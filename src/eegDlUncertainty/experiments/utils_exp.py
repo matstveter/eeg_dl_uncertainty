@@ -109,6 +109,9 @@ def get_parameters_from_config(config_path):
 
     mc_dropout_enabled: bool = config.get('mc_dropout', {}).get('enabled', False)
     mc_dropout_rate: float = config.get('mc_dropout', {}).get('dropout_rate')
+    depth = config.get("model", {}).get("depth")
+    cnn_units = config.get("model", {}).get("cnn_units")
+    max_kernel_size = config.get("model", {}).get("max_kernel_size")
 
     swag_start: int = config.get('swag', {}).get('start')
     swag_lr: float = config.get('swag', {}).get('lr')
@@ -126,10 +129,23 @@ def get_parameters_from_config(config_path):
     fge_cycle_start_lr: float = config.get('fge', {}).get('cycle_start_lr')
     fge_cycle_end_lr: float = config.get('fge', {}).get('cycle_end_lr')
 
+    optuna_experiment: str = config.get('optuna', None)
+
     possible_eeg_epochs = ['all', 'spread', 'random']
 
     if eeg_epochs not in possible_eeg_epochs:
         raise KeyError(f"EEG epochs should be a string with: {possible_eeg_epochs}")
+
+    # We set some important parameters manually here
+    learning_rate = 0.0001
+    batch_size = 64
+    earlystopping = 150
+    training_epochs = 500
+    eeg_epochs = "all"
+    prediction = "dementia"
+    epoch_overlap = False
+    dataset_version = 1
+    use_age = True
 
     # Construct dictionary with parameters
     param = {
@@ -164,6 +180,10 @@ def get_parameters_from_config(config_path):
         'fge_epochs_per_cycle': fge_epochs_per_cycle,
         'fge_cycle_start_lr': fge_cycle_start_lr,
         'fge_cycle_end_lr': fge_cycle_end_lr,
+        'optuna_experiment': optuna_experiment,
+        'depth': depth,
+        'cnn_units': cnn_units,
+        'max_kernel_size': max_kernel_size
     }
 
     possible_predictions = ('dementia', 'abnormal')

@@ -1,20 +1,20 @@
 import argparse
 import os
 import random
-from typing import List, Optional, Union
+from typing import List
+
 import mlflow
 import numpy
 import numpy as np
+import optuna
 import torch
 from braindecode.augmentation import AugmentedDataLoader
 from torch.utils.data import DataLoader
-import optuna
 
 from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
 from eegDlUncertainty.data.data_generators.augmentations import get_augmentations
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
 from eegDlUncertainty.data.results.history import History, get_history_objects
-from eegDlUncertainty.data.results.utils_mlflow import add_config_information
 from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \
     prepare_experiment_environment, \
     setup_experiment_path
@@ -22,22 +22,23 @@ from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
 
 
 def objective(trial, fixed_params):
+    print("Running experiment number: ", trial.number)
     # Fixed parameters
-    dataset_version = fixed_params["dataset_version"]
-    prediction = fixed_params["prediction"]
-    use_age = fixed_params["use_age"]
-    save_path = fixed_params["save_path"]
-    model_name = fixed_params["model_name"]
-    use_test_set = fixed_params["use_test_set"]
-    train_epochs = fixed_params["train_epochs"]
-    batch_size = fixed_params["batch_size"]
-    learning_rate = fixed_params["learning_rate"]
-    earlystopping = fixed_params["earlystopping"]
-    augmentations = fixed_params["augmentations"]
-    augmentation_prob = fixed_params["augmentation_prob"]
-    config_path = fixed_params.get("config_path")
-    overlapping_epochs = fixed_params.get("overlapping_epochs", False)
-    direction = fixed_params.get("direction")
+    dataset_version: int = fixed_params["dataset_version"]
+    prediction: str = fixed_params["prediction"]
+    use_age: bool = fixed_params["use_age"]
+    save_path: str = fixed_params["save_path"]
+    model_name: str = fixed_params["model_name"]
+    use_test_set: bool = fixed_params["use_test_set"]
+    train_epochs: int = fixed_params["train_epochs"]
+    batch_size: int = fixed_params["batch_size"]
+    learning_rate: float = fixed_params["learning_rate"]
+    earlystopping: int = fixed_params["earlystopping"]
+    augmentations: List[str] = fixed_params["augmentations"]
+    augmentation_prob: float = fixed_params["augmentation_prob"]
+    config_path: str = fixed_params.get("config_path")
+    overlapping_epochs: bool = fixed_params.get("overlapping_epochs", False)
+    metric: str = fixed_params.get("metric")
 
     # Define random state and device
     random_state: int = 42
@@ -46,23 +47,36 @@ def objective(trial, fixed_params):
     numpy.random.seed(random_state)
     torch.manual_seed(random_state)
 
+    # Start mlflow run and create a folder for the current run
     mlflow.start_run(run_name=f"run_{str(trial.number)}", nested=True)
     run_path = create_run_folder(path=save_path, index=str(trial.number))
 
     # Define the hyperparameters to search
     age_scaling = trial.suggest_categorical("age_scaling", ["min_max", "standard"])
-    cnn_units = trial.suggest_categorical("cnn_units", [30, 50, 70, 90, 110])
-    depth = trial.suggest_int("depth", 1, 12)
-    eeg_epochs = trial.suggest_categorical("eeg_epochs", ["all", "spread"])
-    num_seconds = trial.suggest_categorical("num_seconds", [5, 10, 20, 30])
+    cnn_units = trial.suggest_categorical("cnn_units", [50, 70])
+    max_kernel_size = trial.suggest_categorical("max_kernel_size", [50, 70])
+    depth = trial.suggest_categorical("depth", [3, 7, 8])
+    num_seconds = trial.suggest_categorical("num_seconds", [5, 30])
+    fc_act = True
+    fc_batch = False
+    fc_drop = False
+    mc_dropout_enabled = trial.suggest_categorical("mc_dropout_enabled", [True, False])
+    mc_dropout_rate = 0.25
+    eeg_epochs = "all"
 
     # Create a dictionary of the parameters
     params = {
         "age_scaling": age_scaling,
         "cnn_units": cnn_units,
         "depth": depth,
-        "eeg_epochs": eeg_epochs,
-        "num_seconds": num_seconds
+        "eeg_epochs": "all",
+        "num_seconds": num_seconds,
+        "fc_act": fc_act,
+        "fc_batch": fc_batch,
+        "fc_drop": fc_drop,
+        "max_kernel_size": max_kernel_size,
+        "mc_dropout_enabled": mc_dropout_enabled,
+        "mc_dropout_rate": mc_dropout_rate
     }
     mlflow.log_params(params)
 
@@ -111,7 +125,15 @@ def objective(trial, fixed_params):
                        "num_classes": dataset.num_classes,
                        "time_steps": dataset.eeg_len,
                        "save_path": run_path,
-                       "learning_rate": learning_rate}
+                       "learning_rate": learning_rate,
+                       "cnn_units": cnn_units,
+                       "depth": depth,
+                       "max_kernel_size": max_kernel_size,
+                       "fc_act": fc_act,
+                       "fc_batch": fc_batch,
+                       "mc_dropout_enabled": mc_dropout_enabled,
+                       "mc_dropout_rate": mc_dropout_rate
+                       }
 
     classifier = MainClassifier(model_name=model_name, **hyperparameters)
     train_history, val_history = get_history_objects(train_loader=train_loader, val_loader=val_loader,
@@ -126,10 +148,11 @@ def objective(trial, fixed_params):
         cleanup_function(experiment_path=run_path)
         print(f"Cuda Out Of Memory -> Cleanup -> Error message: {e}")
 
-        if direction == "minimize":
+        if metric == "loss":
             return np.inf
         else:
-            return -np.inf
+            # If the metric is not loss, we return 0, like for accuracy, auc
+            return 0
 
     else:
         if use_test_set:
@@ -150,15 +173,11 @@ def objective(trial, fixed_params):
         evaluation_history.save_to_mlflow()
         evaluation_history.save_to_pickle()
 
+        optimizing_metric = evaluation_history.get_history_metric(metric_name=metric)[0]
+        mlflow.log_metric(f"optimizing_metric_{metric}", optimizing_metric)
+        return optimizing_metric
     finally:
         mlflow.end_run()
-
-    x = trial.suggest_float("x", -10, 10)
-
-    val = (x - 2) ** 2 + cnn_units
-    mlflow.log_metric("val", val)
-    mlflow.end_run()
-    return val
 
 
 def main():
@@ -184,6 +203,16 @@ def main():
     save_path: str = parameters.pop("save_path")
     model_name: str = parameters.get("classifier_name")
 
+    metric:str = "loss"
+
+    if metric not in ("loss", "accuracy", "auc", "mcc"):
+        raise ValueError("metric must be either 'loss', 'accuracy', 'auc', 'mcc'!")
+
+    if metric == "loss":
+        direction = "minimize"
+    else:
+        direction = "maximize"
+
     experiment_path, folder_name = setup_experiment_path(save_path=save_path,
                                                          config_path=config_path,
                                                          experiment=model_name)
@@ -202,28 +231,20 @@ def main():
         "earlystopping": parameters.get("earlystopping"),
         "augmentations": parameters.get("augmentations"),
         "augmentation_prob": parameters.get("augmentation_prob"),
-        "direction": "minimize"
+        "direction": direction,
+        "metric": metric
     }
 
-    if fixed_params['direction'] not in ("minimize", "maximize"):
-        raise ValueError("direction must be either 'minimize' or 'maximize'")
-
-    experiment_name = "optuna_search"
+    experiment_name = "optuna_search_2"
     prepare_experiment_environment(experiment_name=experiment_name)
     with mlflow.start_run(run_name=experiment_name):
-        study = optuna.create_study(direction=fixed_params["direction"])
-        study.optimize(lambda trial: objective(trial, fixed_params), n_trials=10)
+        study = optuna.create_study(study_name="hyper_search", direction=fixed_params["direction"])
+        # Optimization
+        study.optimize(lambda trial: objective(trial, fixed_params), n_trials=75)
 
-        print(study.best_params)
-
+        # Log the best parameters
         for k, v in study.best_params.items():
-            print(f"{k}: {v}")
             mlflow.log_param(k, v)
-
-
-
-
-
 
 
 if __name__ == "__main__":

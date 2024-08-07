@@ -21,7 +21,6 @@ class Ensemble(torch.nn.Module):
 
         self.temperature = torch.nn.Parameter(torch.ones(1))
 
-        print(self.temperature)
 
     def forward(self, x, apply_mean=True):
         """ Forward pass of the ensemble model. The output is the average of the logits of the classifiers.
@@ -157,8 +156,6 @@ class Ensemble(torch.nn.Module):
 
         class_uncertainty = compute_classwise_uncertainty(all_probs=all_predictions, mean_probs=probs,
                                                           one_hot_target=target_one_hot, targets=target_class)
-
-        get_more_metrics(preds=probs, targets=target_one_hot)
 
         results = {"performance": performance, "uncertainty": uncertainty, "class_uncertainty": class_uncertainty,
                    "predictions": prediction_dict}

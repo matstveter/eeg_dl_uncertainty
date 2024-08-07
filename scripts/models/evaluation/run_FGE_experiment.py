@@ -1,8 +1,16 @@
+import matplotlib
+
+from eegDlUncertainty.experiments.dataset_shift_experiment import eval_dataset_shifts
+from eegDlUncertainty.experiments.ood_experiments import ood_exp
+from eegDlUncertainty.models.classifiers.ensemble import Ensemble
+
+# from eegDlUncertainty.models.classifiers.swag_classifier import SWAGClassifier
+
+matplotlib.use("TkAgg")
 import argparse
 import os
 import random
 from typing import List, Optional, Union
-
 import mlflow
 import numpy
 import torch
@@ -14,17 +22,14 @@ from eegDlUncertainty.data.data_generators.augmentations import get_augmentation
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
 from eegDlUncertainty.data.results.history import History, get_history_objects
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information
-from eegDlUncertainty.experiments.dataset_shift_experiment import eval_dataset_shifts
-from eegDlUncertainty.experiments.ood_experiments import ood_exp
 from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \
     prepare_experiment_environment, \
     setup_experiment_path
-from eegDlUncertainty.models.classifiers.ensemble import Ensemble
-from eegDlUncertainty.models.classifiers.main_classifier import SnapshotClassifier
+from eegDlUncertainty.models.classifiers.main_classifier import FGEClassifier
 
 
 def main():
-    experiment = "snapshot_ensemble"
+    experiement = "FGE_ensemble"
     #########################################################################################################
     # Get arguments and read config file
     #########################################################################################################
@@ -67,12 +72,20 @@ def main():
     batch_size: int = parameters.pop("batch_size")
     learning_rate: float = parameters.pop("learning_rate")
     earlystopping: int = parameters.pop("earlystopping")
+    
+    # General variables
+    model_p = {
+        'depth': parameters.pop("depth"),
+        'cnn_units': parameters.pop("cnn_units"),
+        'max_kernel_size': parameters.pop("max_kernel_size")
+    }
 
-    # For the snapshot ensemble
-    snapshot_cycle_epochs: int = parameters.pop("snapshot_cycle_epochs")
-    snapshot_num_cycles: int = parameters.pop("snapshot_num_cycles")
-    snapshot_start_lr: float = parameters.pop("snapshot_lr")
-    snapshot_use_best_model: bool = parameters.pop("snapshot_use_best_model")
+    # FGE Parameters
+    fge_start_epoch: int = parameters.pop("fge_start_epoch")
+    fge_num_models: int = parameters.pop("fge_num_models")
+    fge_epochs_per_cycle: int = parameters.pop("fge_epochs_per_cycle")
+    fge_cycle_start_lr: float = parameters.pop("fge_cycle_start_lr")
+    fge_cycle_end_lr: float = parameters.pop("fge_cycle_end_lr")
 
     random_state: int = 42
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -82,8 +95,8 @@ def main():
 
     experiment_path, folder_name = setup_experiment_path(save_path=save_path,
                                                          config_path=config_path,
-                                                         experiment=experiment)
-    experiment_name = f"{experiment}_experiments"
+                                                         experiment=experiement)
+    experiment_name = f"{experiement}_experiments"
     prepare_experiment_environment(experiment_name=experiment_name)
     #########################################################################################################
     # Dataset
@@ -135,30 +148,30 @@ def main():
         num_runs = 1
 
         for run_id in range(num_runs):
-            print("Starting run: ", run_id)
-            mlflow.start_run(run_name=f"{experiment}_{str(run_id)}", nested=True)
+            mlflow.start_run(run_name=f"{experiement}_run_{str(run_id)}", nested=True)
             run_path = create_run_folder(path=experiment_path, index=str(run_id))
             hyperparameters = {"in_channels": dataset.num_channels,
                                "num_classes": dataset.num_classes,
                                "time_steps": dataset.eeg_len,
                                "save_path": run_path,
                                "learning_rate": learning_rate}
+            hyperparameters.update(model_p)
             param.update(hyperparameters)
             add_config_information(config=param, dataset="CAUEEG")
 
-            classifier = SnapshotClassifier(model_name=model_name, **hyperparameters)
+            classifier = FGEClassifier(model_name=model_name, **hyperparameters)
             train_history, val_history = get_history_objects(train_loader=train_loader, val_loader=val_loader,
                                                              save_path=save_path, num_classes=dataset.num_classes)
             try:
                 model_weight_list = classifier.fit_model(train_loader=train_loader, training_epochs=train_epochs,
-                                                         device=device, loss_fn=criterion,
-                                                         earlystopping_patience=earlystopping,
+                                                         device=device,
+                                                         loss_fn=criterion, earlystopping_patience=earlystopping,
                                                          val_loader=val_loader, train_hist=train_history,
                                                          val_history=val_history,
-                                                         start_lr=snapshot_start_lr,
-                                                         epochs_per_cycle=snapshot_cycle_epochs,
-                                                         use_best=snapshot_use_best_model,
-                                                         num_cycles=snapshot_num_cycles)
+                                                         fge_start_epoch=fge_start_epoch, fge_num_models=fge_num_models,
+                                                         fge_epochs_per_cycle=fge_epochs_per_cycle,
+                                                         fge_cycle_start_lr=fge_cycle_start_lr,
+                                                         fge_cycle_end_lr=fge_cycle_end_lr)
             except torch.cuda.OutOfMemoryError as e:
                 mlflow.set_tag("Exception", "CUDA Out of Memory Error")
                 mlflow.log_param("Exception Message", str(e))
@@ -166,7 +179,7 @@ def main():
                 print(f"Cuda Out Of Memory -> Cleanup -> Error message: {e}")
                 break
             else:
-                # Save the training and validation history
+
                 train_history.save_to_mlflow()
                 train_history.save_to_pickle()
                 val_history.save_to_mlflow()
@@ -176,45 +189,46 @@ def main():
 
                 # Load all the models from the weigh lists
                 for m_weights in model_weight_list:
-                    classifiers.append(SnapshotClassifier(model_name=model_name, pretrained=m_weights,
-                                                          **hyperparameters))
+                    classifer = FGEClassifier(model_name=model_name, pretrained=m_weights, **hyperparameters)
+                    classifiers.append(classifer.to(device))
 
                 # For each classifier, test the model and save the history
                 for i, cl in enumerate(classifiers):
-                    print(f"Testing classifier {i + 1} of {len(classifiers)}. ")
-                    if use_test_set:
-                        evaluation_history = History(num_classes=dataset.num_classes, set_name=f"test_{i}",
-                                                     loader_lenght=len(test_loader), save_path=run_path)
-                        cl.test_model(test_loader=test_loader, device=device, test_hist=evaluation_history,
-                                      loss_fn=criterion)
-                    else:
-                        evaluation_history = History(num_classes=dataset.num_classes, set_name=f"test_val_{i}",
+                    print(f"\nTesting classifier {i + 1} of {len(classifiers)}. ")
+                    evaluation_history_val = History(num_classes=dataset.num_classes, set_name=f"test_val_{i}",
                                                      loader_lenght=len(val_loader), save_path=run_path)
-                        cl.test_model(test_loader=val_loader, device=device, test_hist=evaluation_history,
-                                      loss_fn=criterion)
-                    evaluation_history.save_to_mlflow()
-                    evaluation_history.save_to_pickle()
+                    classifier.test_model(test_loader=val_loader, device=device, test_hist=evaluation_history_val,
+                                          loss_fn=criterion)
+
+                    evaluation_history_test = History(num_classes=dataset.num_classes, set_name=f"test_{i}",
+                                                      loader_lenght=len(test_loader), save_path=run_path)
+                    classifier.test_model(test_loader=test_loader, device=device, test_hist=evaluation_history_test,
+                                          loss_fn=criterion)
+
+                    evaluation_history_val.save_to_mlflow()
+                    evaluation_history_val.save_to_pickle()
+                    evaluation_history_test.save_to_mlflow()
+                    evaluation_history_test.save_to_pickle()
 
             finally:
                 mlflow.end_run()
 
+            # Initialize ensemble model with the trained classifiers
             ens = Ensemble(classifiers=classifiers, device=device)
-
-            if use_test_set:
-                ens.ensemble_performance_and_uncertainty(data_loader=test_loader, device=device, save_path=run_path,
-                                                         save_to_mlflow=True, save_to_pickle=True,
-                                                         save_name="ensemble_results_test")
-                eval_dataset_shifts(ensemble_class=ens, test_subjects=test_subjects, dataset=dataset,
-                                    device=device, use_age=use_age, batch_size=batch_size,
-                                    save_path=run_path)
-            else:
-                ens.ensemble_performance_and_uncertainty(data_loader=val_loader, device=device, save_path=run_path,
-                                                         save_to_mlflow=True, save_to_pickle=True,
-                                                         save_name="ensemble_results_val")
-                eval_dataset_shifts(ensemble_class=ens, test_subjects=val_subjects, dataset=dataset,
-                                    device=device, use_age=use_age, batch_size=batch_size,
-                                    save_path=run_path)
-
+            # Set the temperature scale for the ensemble
+            ens.set_temperature_scale_ensemble(data_loader=val_loader, device=device, criterion=criterion)
+            # Test the ensemble model on the validation and test set
+            ens.ensemble_performance_and_uncertainty(data_loader=val_loader, device=device, save_path=run_path,
+                                                     save_to_mlflow=True, save_to_pickle=True,
+                                                     save_name="ensemble_results_val")
+            ens.ensemble_performance_and_uncertainty(data_loader=test_loader, device=device, save_path=run_path,
+                                                     save_to_mlflow=True, save_to_pickle=True,
+                                                     save_name="ensemble_results_test")
+            # Evaluate the dataset shifts on the ensemble model using the test set
+            eval_dataset_shifts(ensemble_class=ens, test_subjects=test_subjects, dataset=dataset,
+                                device=device, use_age=use_age, batch_size=batch_size,
+                                save_path=run_path)
+            # Run the OOD experiment
             ood_exp(ensemble_class=ens, dataset_version=dataset_version,
                     num_seconds=num_seconds,
                     age_scaling=age_scaling, device=device, batch_size=batch_size,

@@ -194,6 +194,7 @@ class InceptionNetwork(BaseClassifier):
             max_kernel_size: Max kernel size of in Inception modules
             use_residual: To use Shortcut layers or not
         """
+        print(kwargs)
         # -----------------------------
         # Required kwargs
         # -----------------------------
@@ -212,9 +213,9 @@ class InceptionNetwork(BaseClassifier):
         mc_dropout_enabled: bool = kwargs.get("mc_dropout_enabled")
         mc_dropout_rate: float = kwargs.get("mc_dropout_rate")
 
-        self.use_fc_drop: bool = kwargs.get("fc_bool", False)
-        self.use_act: bool = kwargs.get("fc_act", False)
-        self.use_batch: bool = kwargs.get('fc_batch', False)
+        self.use_fc_drop: bool = False
+        self.use_act: bool = True
+        self.use_batch: bool = False
 
         # -----------------------------
         # Store hyperparameters

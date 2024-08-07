@@ -373,7 +373,7 @@ class MainClassifier(abc.ABC, nn.Module):
 
 class MCClassifier(MainClassifier):
 
-    def forward_ensemble(self, x: torch.Tensor, num_sampling=5):
+    def forward_ensemble(self, x: torch.Tensor, num_sampling=50):
         with torch.no_grad():
             self.eval()
             for m in self.modules():
@@ -552,7 +552,7 @@ class FGEClassifier(MainClassifier):
             # At halfway through the cycle, save the model weights
             if (epoch - pretrain_epochs) % epochs_per_cycle == epochs_per_cycle // 2:
                 path = os.path.join(self._model_path, f"FGE_cycle_{epoch}_model")
-                torch.save(self.classifier.state_dict(), path)
+                self.classifier.save(path=path)
                 model_weight_paths.append(path)
                 print("\nModel saved at epoch", epoch + 1, " lr_schedule: ", lr)
 
@@ -644,7 +644,7 @@ class SWAGClassifier(MainClassifier):
                 val_history.batch_stats(y_pred=y_pred, y_true=targets, loss=val_loss)
             val_history.on_epoch_end()
 
-    def forward_ensemble(self, x: torch.Tensor, num_sampling=5):
+    def forward_ensemble(self, x: torch.Tensor, num_sampling=50):
         self.eval()  # Ensure the model is in evaluation mode
         logits = []
 
