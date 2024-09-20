@@ -23,7 +23,7 @@ from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
 
 
 def main():
-    experiment = "augmentation_ensemble"
+    experiment = "augmentation_ensemble_final"
     #########################################################################################################
     # Get arguments and read config file
     #########################################################################################################

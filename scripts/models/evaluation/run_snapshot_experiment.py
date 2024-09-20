@@ -24,7 +24,7 @@ from eegDlUncertainty.models.classifiers.main_classifier import SnapshotClassifi
 
 
 def main():
-    experiment = "snapshot_ensemble"
+    experiment = "snapshot_ensemble_final"
     #########################################################################################################
     # Get arguments and read config file
     #########################################################################################################

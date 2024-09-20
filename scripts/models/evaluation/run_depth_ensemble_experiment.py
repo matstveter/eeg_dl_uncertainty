@@ -24,7 +24,7 @@ from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
 
 
 def main():
-    experiment = "depth_ensemble"
+    experiment = "depth_ensemble_final"
     #########################################################################################################
     # Get arguments and read config file
     #########################################################################################################

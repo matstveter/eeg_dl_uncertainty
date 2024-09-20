@@ -11,12 +11,12 @@ from torch.utils.data import DataLoader
 from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
 from eegDlUncertainty.data.data_generators.augmentations import get_augmentations
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
-from eegDlUncertainty.data.results.history import History, MCHistory, get_history_objects
+from eegDlUncertainty.data.results.history import History, get_history_objects
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information
 from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \
     prepare_experiment_environment, \
     setup_experiment_path
-from eegDlUncertainty.models.classifiers.main_classifier import MCClassifier, MainClassifier
+from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
 
 
 def main():
@@ -54,7 +54,7 @@ def main():
 
     # Augmentation related information
     augmentations: List[Union[str, None]] = parameters.pop("augmentations")
-    augmentation_prob: Optional[float] = parameters.pop("augmentation_prob", 0.2)
+    augmentation_prob: Optional[float] = parameters.pop("augmentation_prob", 0.5)
 
     # Model training
     model_name: str = parameters.get("classifier_name")
@@ -72,13 +72,14 @@ def main():
     experiment_path, folder_name = setup_experiment_path(save_path=save_path,
                                                          config_path=config_path,
                                                          experiment=model_name)
-    experiment_name = "Test_experiments"
+    experiment_name = "NormalModel"
     prepare_experiment_environment(experiment_name=experiment_name)
     #########################################################################################################
     # Dataset
     #########################################################################################################
     dataset = CauEEGDataset(dataset_version=dataset_version, targets=prediction, eeg_len_seconds=num_seconds,
-                            epochs=eeg_epochs, overlapping_epochs=overlapping_epochs, age_scaling=age_scaling)
+                            epochs=eeg_epochs, overlapping_epochs=overlapping_epochs, age_scaling=age_scaling,
+                            save_dir=experiment_path)
     train_subjects, val_subjects, test_subjects = dataset.get_splits()
 
     if "test" in config_path:

@@ -131,8 +131,19 @@ class MainClassifier(abc.ABC, nn.Module):
                   earlystopping_patience: int, **kwargs):
 
         best_loss = 1_000_000
+        optimizer_name = kwargs.pop("optimizer_name", "adam")
 
-        optimizer = torch.optim.Adam(self.classifier.parameters(), lr=self._learning_rate)
+        if optimizer_name == "sgd":
+            optimizer = torch.optim.SGD(self.classifier.parameters(), lr=self._learning_rate, momentum=0.9,
+                                        nesterov=True)
+        elif optimizer_name == "adam":
+            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=self._learning_rate)
+        elif optimizer_name == "nadam":
+            optimizer = torch.optim.NAdam(self.classifier.parameters(), lr=self._learning_rate)
+        else:
+            raise ValueError(f"Unsupported optimizer: {optimizer_name}")
+
+        # optimizer = torch.optim.Adam(self.classifier.parameters(), lr=self._learning_rate)
         self.to(device)
 
         best_path = None

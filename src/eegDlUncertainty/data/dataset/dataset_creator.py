@@ -2,6 +2,7 @@ import multiprocessing
 import os
 import shutil
 import time
+import autoreject
 from typing import Any, Dict, Tuple, Union
 
 import mne
@@ -179,17 +180,18 @@ def process_eeg_data(config: Dict[str, Any], conf_path: str) -> None:
     if config['use_multiprocessing']:
         with multiprocessing.Pool(processes=(multiprocessing.cpu_count() - 3)) as pool:
             pool.starmap(process_eeg_file,
-                         [(sub_eeg, eeg_path, events, preprocess, preprocess['nyquist'], outp_path)
+                         [(sub_eeg, eeg_path, events, preprocess, preprocess['nyquist'], outp_path,
+                           preprocess['autoreject'])
                           for sub_eeg in eeg_files])
     else:
         for sub_eeg in eeg_files:
             process_eeg_file(sub_eeg=sub_eeg, eeg_path=eeg_path, events=events, preprocess=preprocess,
-                             nyquist=preprocess['nyquist'], out_p=outp_path)
+                             nyquist=preprocess['nyquist'], out_p=outp_path, use_autoreject=preprocess['autoreject'])
     print(f"Processing finished, time used: {time.perf_counter() - start}")
     shutil.copy(src=conf_path, dst=outp_path)
 
 
-def process_eeg_file(sub_eeg, eeg_path, events, preprocess, nyquist, out_p):
+def process_eeg_file(sub_eeg, eeg_path, events, preprocess, nyquist, out_p, use_autoreject):
     """
     Process a single EEG file by applying specified preprocessing steps.
 
@@ -199,6 +201,7 @@ def process_eeg_file(sub_eeg, eeg_path, events, preprocess, nyquist, out_p):
 
     Parameters
     ----------
+    use_autoreject
     sub_eeg : str
         The filename of the EEG data file to be processed.
     eeg_path : str
@@ -260,8 +263,10 @@ def process_eeg_file(sub_eeg, eeg_path, events, preprocess, nyquist, out_p):
     raw_eeg_data.crop(tmin=start_time, tmax=end_time, verbose=False, include_tmax=False)
 
     # Lowpass and high_pass filter the data
+    raw_eeg_data.notch_filter(freqs=50, verbose=False)
     raw_eeg_data.filter(l_freq=preprocess['low_freq'], h_freq=preprocess['high_freq'], verbose=False)
 
+    new_sampling_rate = raw_eeg_data.info['sfreq']
     # If downsample is set to true, use the nyquist argument to specify the new sampling rate
     if preprocess['downsample']:
         if preprocess['high_freq'] * nyquist > 200:
@@ -273,7 +278,41 @@ def process_eeg_file(sub_eeg, eeg_path, events, preprocess, nyquist, out_p):
     if preprocess['rereference_avg']:
         raw_eeg_data.set_eeg_reference('average', verbose=False)
 
-    data = raw_eeg_data.get_data()
+    if use_autoreject:
+        # Your channel names
+        ch_names = ['Fp1', 'F3', 'C3', 'P3', 'O1', 'Fp2', 'F4', 'C4',
+                    'P4', 'O2', 'F7', 'T3', 'T5', 'F8', 'T4', 'T6',
+                    'Fz', 'Cz', 'Pz']
+        # Ensure channel count matches
+        if len(raw_eeg_data.ch_names) != len(ch_names):
+            raise ValueError("Mismatch between provided and actual channel names count.")
+
+        # Rename channels and apply standard 10-20 montage
+        raw_eeg_data.rename_channels(dict(zip(raw_eeg_data.ch_names, ch_names)))
+        raw_eeg_data.set_montage(mne.channels.make_standard_montage('standard_1020'))
+
+        epochs = mne.make_fixed_length_epochs(raw_eeg_data.copy(), duration=preprocess['autoreject_epochs'],
+                                              preload=True, verbose=False)
+
+        ar = autoreject.AutoReject(random_state=11,
+                                   n_jobs=1, verbose=False, cv=min(10, len(epochs)))
+        ar.fit(epochs)
+        epochs_ar, reject_log = ar.transform(epochs, return_log=True)
+        if len(epochs_ar) == 0:
+            print(f"Skipping {subject_id} due to no epochs")
+            return
+        # Concatenate epochs, this can cause discontinuities in the data, but it will be handled by reading the same
+        # of seconds in the
+        data = np.concatenate(epochs_ar.get_data(copy=True), axis=1)
+
+        # Check if the data is too short
+        remaining_time = data.shape[1] / new_sampling_rate
+        if remaining_time < preprocess['num_seconds_per_subject']:
+            print(f"Data is too short, skipping {subject_id}")
+            return
+    else:
+        data = raw_eeg_data.get_data()
+
     save_path = os.path.join(out_p, f"{subject_id}.npy")
     np.save(save_path, data)
     print(f"{subject_id}: Done")
@@ -405,7 +444,31 @@ def create_tdbrain_dataset(config, conf_path):
 
         raw.set_eeg_reference('average', verbose=False)
 
-        data = raw.get_data()
+        if preprocess['autoreject']:
+            raw.set_montage(mne.channels.make_standard_montage('standard_1020'))
+            epochs = mne.make_fixed_length_epochs(raw.copy(), duration=preprocess['autoreject_epochs'],
+                                                  preload=True, verbose=False)
+            if len(epochs) <= 2:
+                print(f"Skipping {sub} due to no epochs: {len(epochs)}")
+                continue
+            ar = autoreject.AutoReject(random_state=11,
+                                       n_jobs=1, verbose=False, cv=min(10, len(epochs)))
+            ar.fit(epochs)
+            epochs_ar, reject_log = ar.transform(epochs, return_log=True)
+            if len(epochs_ar) == 0:
+                print(f"Skipping {sub} due to no epochs")
+                continue
+            # Concatenate epochs, this can cause discontinuities in the data, but it will be handled by reading the same
+            # of seconds in the
+            data = np.concatenate(epochs_ar.get_data(copy=True), axis=1)
+
+            # Check if the data is too short
+            remaining_time = data.shape[1] / preprocess['sfreq']
+            if remaining_time < 30:
+                print(f"Data is too short, skipping {sub}")
+                continue
+        else:
+            data = raw.get_data()
 
         save_path = os.path.join(outp_path, f"{sub}.npy")
         np.save(save_path, data)
@@ -454,8 +517,34 @@ def create_greek_dataset(config, conf_path):
         raw.resample(preprocess['sfreq'], verbose=False)
 
         raw.set_eeg_reference('average', verbose=False)
+        
+        if preprocess['autoreject']:
+            raw.set_montage(mne.channels.make_standard_montage('standard_1020'))
+            epochs = mne.make_fixed_length_epochs(raw.copy(), duration=preprocess['autoreject_epochs'],
+                                                  preload=True, verbose=False)
+            
+            if len(epochs) <= 2:
+                print(f"Skipping {sub} due to no epochs")
+                continue
+            
+            ar = autoreject.AutoReject(random_state=11,
+                                       n_jobs=1, verbose=False, cv=min(10, len(epochs)))
+            ar.fit(epochs)
+            epochs_ar, reject_log = ar.transform(epochs, return_log=True)
+            if len(epochs_ar) == 0:
+                print(f"Skipping {sub} due to no epochs")
+                continue
+            # Concatenate epochs, this can cause discontinuities in the data, but it will be handled by reading the same
+            # of seconds in the
+            data = np.concatenate(epochs_ar.get_data(copy=True), axis=1)
 
-        data = raw.get_data()
+            # Check if the data is too short
+            remaining_time = data.shape[1] / preprocess['sfreq']
+            if remaining_time < 30:
+                print(f"Data is too short, skipping {sub}")
+                continue
+        else:
+            data = raw.get_data()
 
         save_path = os.path.join(outp_path, f"{sub}.npy")
         np.save(save_path, data)
@@ -512,7 +601,32 @@ def create_MPI_dataset(config, conf_path):
             raw.resample(preprocess['sfreq'], verbose=False)
 
             raw.set_eeg_reference('average', verbose=False)
-            data = raw.get_data()
+
+            if preprocess['autoreject']:
+                raw.set_montage(mne.channels.make_standard_montage('standard_1020'))
+                epochs = mne.make_fixed_length_epochs(raw.copy(), duration=preprocess['autoreject_epochs'],
+                                                      preload=True, verbose=False)
+
+                if len(epochs) <= 2:
+                    print(f"Skipping {sub} due to no epochs")
+                    continue
+
+                ar = autoreject.AutoReject(random_state=11,
+                                           n_jobs=1, verbose=False, cv=min(10, len(epochs)))
+                ar.fit(epochs)
+                epochs_ar, reject_log = ar.transform(epochs, return_log=True)
+                if len(epochs_ar) == 0:
+                    print(f"Skipping {sub} due to no epochs")
+                    continue
+                data = np.concatenate(epochs_ar.get_data(copy=True), axis=1)
+
+                # Check if the data is too short
+                remaining_time = data.shape[1] / preprocess['sfreq']
+                if remaining_time < 30:
+                    print(f"Data is too short, skipping {sub}")
+                    continue
+            else:
+                data = raw.get_data()
 
             save_path = os.path.join(outp_path, f"{sub}.npy")
             np.save(save_path, data)

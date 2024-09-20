@@ -19,7 +19,6 @@ from eegDlUncertainty.models.base_classifier import BaseClassifier
 # Sub-modules
 # ---------------------------
 class _InceptionModule(nn.Module):
-
     num_kernel_sizes = 3
 
     def __init__(self, in_channels: int, units: int, use_bottleneck: bool, max_kernel_size: int,
@@ -177,7 +176,6 @@ class _ShortcutLayer(nn.Module):
 # Main module
 # ---------------------------
 class InceptionNetwork(BaseClassifier):
-
     activation_function = "linear"
 
     def __init__(self, **kwargs):
@@ -194,14 +192,13 @@ class InceptionNetwork(BaseClassifier):
             max_kernel_size: Max kernel size of in Inception modules
             use_residual: To use Shortcut layers or not
         """
-        print(kwargs)
         # -----------------------------
         # Required kwargs
         # -----------------------------
         in_channels: int = kwargs.pop("in_channels")
         num_classes: int = kwargs.pop("num_classes")
 
-        # -----------------------------
+        # ----------------------------
         # Optional kwargs
         # -----------------------------
         cnn_units: int = kwargs.get("cnn_units", 32)
@@ -213,9 +210,12 @@ class InceptionNetwork(BaseClassifier):
         mc_dropout_enabled: bool = kwargs.get("mc_dropout_enabled")
         mc_dropout_rate: float = kwargs.get("mc_dropout_rate")
 
-        self.use_fc_drop: bool = False
-        self.use_act: bool = True
-        self.use_batch: bool = False
+        # Model specific values
+        num_fc_layers = kwargs.get("num_fc_layers", 1)
+        neurons_fc = kwargs.get("neurons_fc", 8)
+        use_batch_fc = kwargs.get("use_batch_fc", False)
+        use_dropout_fc = kwargs.get("use_dropout_fc", False)
+        dropout_rate_fc = kwargs.get("dropout_rate_fc", 0.25)
 
         # -----------------------------
         # Store hyperparameters
@@ -223,7 +223,9 @@ class InceptionNetwork(BaseClassifier):
         super().__init__(in_channels=in_channels, num_classes=num_classes, cnn_units=cnn_units, depth=depth,
                          use_bottleneck=use_bottleneck, activation=activation, max_kernel_size=max_kernel_size,
                          use_residual=use_residual, classifier_name=kwargs.get("classifier_name"),
-                         mc_dropout_enabled=mc_dropout_enabled, mc_dropout_rate=mc_dropout_rate)
+                         mc_dropout_enabled=mc_dropout_enabled, mc_dropout_rate=mc_dropout_rate,
+                         num_fc_layers=num_fc_layers, neurons_fc=neurons_fc, use_batch_fc=use_batch_fc,
+                         use_dropout_fc=use_dropout_fc, dropout_rate_fc=dropout_rate_fc)
 
         # -----------------------------
         # Define Inception modules
@@ -234,7 +236,7 @@ class InceptionNetwork(BaseClassifier):
                               use_bottleneck=use_bottleneck, activation=activation,
                               max_kernel_size=max_kernel_size, mc_dropout_enabled=mc_dropout_enabled,
                               mc_dropout_rate=mc_dropout_rate)
-             for i, in_channel in enumerate([in_channels] + [output_channels]*(depth - 1))]
+             for i, in_channel in enumerate([in_channels] + [output_channels] * (depth - 1))]
         )
 
         # -----------------------------
@@ -257,16 +259,44 @@ class InceptionNetwork(BaseClassifier):
         # average pooling is implemented in
         # forward method)
         # -----------------------------
-        self._fc_layer = nn.Linear(in_features=output_channels,
-                                   out_features=num_classes)
-        self._fc_one_layer_age = nn.Linear(in_features=output_channels + 1, out_features=num_classes)
+        fc_network = [nn.Linear(in_features=output_channels + 1, out_features=neurons_fc)]
 
-        self._fc_layer_age = nn.Linear(in_features=output_channels + 1, out_features=8)
+        if use_batch_fc:
+            fc_network.append(nn.BatchNorm1d(neurons_fc))
+        if use_dropout_fc:
+            fc_network.append(nn.Dropout(p=dropout_rate_fc))
+        fc_network.append(nn.ReLU())
 
-        self._batch = nn.BatchNorm1d(8)
-        self._fc_layer_last = nn.Linear(in_features=8, out_features=num_classes)
-        self._act = nn.ReLU()
-        self._dropout = nn.Dropout(p=0.3)
+        num_fc_layers -= 1  # Adjust for the initial FC layer already added
+        current_neurons = neurons_fc
+
+        if num_fc_layers > 0:  # Ensure there's at least one layer
+            for _ in range(num_fc_layers):
+                next_neurons = int(current_neurons // 2)
+                if next_neurons < 2:
+                    break  # Avoid layers with very few neurons
+                fc_network.append(nn.Linear(in_features=current_neurons, out_features=next_neurons))
+                if use_batch_fc:
+                    fc_network.append(nn.BatchNorm1d(next_neurons))
+                if use_dropout_fc:
+                    fc_network.append(nn.Dropout(p=dropout_rate_fc))
+                fc_network.append(nn.ReLU())
+                current_neurons = next_neurons
+
+        fc_network.append(nn.Linear(in_features=current_neurons, out_features=num_classes))
+        print(fc_network)
+        self._fc_network = nn.Sequential(*fc_network)
+
+        # self._fc_layer = nn.Linear(in_features=output_channels,
+        #                            out_features=num_classes)
+        # self._fc_one_layer_age = nn.Linear(in_features=output_channels + 1, out_features=num_classes)
+        #
+        # self._fc_layer_age = nn.Linear(in_features=output_channels + 1, out_features=8)
+        #
+        # self._batch = nn.BatchNorm1d(8)
+        # self._fc_layer_last = nn.Linear(in_features=8, out_features=num_classes)
+        # self._act = nn.ReLU()
+        # self._dropout = nn.Dropout(p=0.3)
 
     def forward(self, input_tensor: torch.Tensor) -> torch.Tensor:
         """
@@ -314,23 +344,22 @@ class InceptionNetwork(BaseClassifier):
             # Concatenate age along the feature dimension
             x = torch.cat((x, age), dim=1)
 
-            if self.use_fc_drop:
-                x = self._fc_layer_age(x)
-                x = self._dropout(x)
-                if self.use_batch:
-                    x = self._batch(x)
-                if self.use_act:
-                    x = self._act(x)
-                x = self._fc_layer_last(x)
-            else:
-                x = self._fc_one_layer_age(x)
-            return x
+            # if self.use_fc_drop:
+            #     x = self._fc_layer_age(x)
+            #     x = self._dropout(x)
+            #     if self.use_batch:
+            #         x = self._batch(x)
+            #     if self.use_act:
+            #         x = self._act(x)
+            #     x = self._fc_layer_last(x)
+            # else:
+            #     x = self._fc_one_layer_age(x)
+            # return x
+
+            return self._fc_network(x)
 
         else:
-
-            # Pass through FC layer and return. No activation function used
-            x = self._fc_layer(x)
-            return x
+            raise ValueError("Age must be provided")
 
 
 # ------------------

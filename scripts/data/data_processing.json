@@ -6,12 +6,14 @@
     "use_end_time": true,
     "rereference_avg": true,
     "downsample": false,
-    "nyquist": 3
+    "nyquist": 3,
+    "autoreject": true,
+    "autoreject_epochs": 5
   },
   "file_paths": {
     "eeg_data": "/home/tvetern/datasets/cau_eeg/caueeg-dataset/signal/edf/",
     "eeg_events": "/home/tvetern/datasets/cau_eeg/caueeg-dataset/event/",
     "output_directory": "/home/tvetern/datasets/cau_eeg/numpy/"
   },
-  "use_multiprocessing": true
+  "use_multiprocessing": false
 }

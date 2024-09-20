@@ -136,17 +136,6 @@ def get_parameters_from_config(config_path):
     if eeg_epochs not in possible_eeg_epochs:
         raise KeyError(f"EEG epochs should be a string with: {possible_eeg_epochs}")
 
-    # We set some important parameters manually here
-    learning_rate = 0.0001
-    batch_size = 64
-    earlystopping = 150
-    training_epochs = 500
-    eeg_epochs = "all"
-    prediction = "dementia"
-    epoch_overlap = False
-    dataset_version = 1
-    use_age = True
-
     # Construct dictionary with parameters
     param = {
         'use_test_set': use_test_set,

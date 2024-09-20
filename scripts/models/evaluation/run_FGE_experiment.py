@@ -29,7 +29,7 @@ from eegDlUncertainty.models.classifiers.main_classifier import FGEClassifier
 
 
 def main():
-    experiement = "FGE_ensemble"
+    experiement = "FGE_ensemble_final"
     #########################################################################################################
     # Get arguments and read config file
     #########################################################################################################

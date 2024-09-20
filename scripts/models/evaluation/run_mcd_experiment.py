@@ -28,7 +28,7 @@ from eegDlUncertainty.models.classifiers.main_classifier import MCClassifier
 
 
 def main():
-    experiement = "MCD_ensemble"
+    experiement = "MCD_ensemble_final"
     #########################################################################################################
     # Get arguments and read config file
     #########################################################################################################

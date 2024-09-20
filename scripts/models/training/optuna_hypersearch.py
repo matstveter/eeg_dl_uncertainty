@@ -53,14 +53,21 @@ def objective(trial, fixed_params):
 
     # Define the hyperparameters to search
     age_scaling = trial.suggest_categorical("age_scaling", ["min_max", "standard"])
-    cnn_units = trial.suggest_categorical("cnn_units", [50, 70])
-    max_kernel_size = trial.suggest_categorical("max_kernel_size", [50, 70])
-    depth = trial.suggest_categorical("depth", [3, 7, 8])
-    num_seconds = trial.suggest_categorical("num_seconds", [5, 30])
-    fc_act = True
-    fc_batch = False
-    fc_drop = False
-    mc_dropout_enabled = trial.suggest_categorical("mc_dropout_enabled", [True, False])
+    cnn_units = trial.suggest_categorical("cnn_units", [10, 20, 30, 40, 50, 60, 70])
+    max_kernel_size = trial.suggest_categorical("max_kernel_size", [10, 20, 30, 40, 50, 60, 70, 80])
+    depth = trial.suggest_categorical("depth", [3, 4, 5, 6, 7, 8, 9, 10, 11])
+    num_seconds = trial.suggest_categorical("num_seconds", [5, 10, 15, 30])
+    dataset_version = trial.suggest_categorical("dataset_version", [1, 2, 3, 4])
+    opt_name = trial.suggest_categorical("optimizer_name", ["adam", "nadam", "sgd"])
+
+    # Fully connected layer spesific
+    num_fc_layers = trial.suggest_categorical("num_fc_layers", [1, 2, 3, 4, 5])
+    neurons_fc = trial.suggest_categorical("neurons_fc", [256, 128, 64, 32, 16, 8])
+    use_batch_fc = trial.suggest_categorical("use_batch_fc", [True, False])
+    use_dropout_fc = trial.suggest_categorical("use_dropout_fc", [True, False])
+    dropout_rate_fc = trial.suggest_categorical("dropout_rate_fc", [0.1, 0.25, 0.5])
+
+    mc_dropout_enabled = False
     mc_dropout_rate = 0.25
     eeg_epochs = "all"
 
@@ -71,12 +78,17 @@ def objective(trial, fixed_params):
         "depth": depth,
         "eeg_epochs": "all",
         "num_seconds": num_seconds,
-        "fc_act": fc_act,
-        "fc_batch": fc_batch,
-        "fc_drop": fc_drop,
         "max_kernel_size": max_kernel_size,
+        "dataset_version": dataset_version,
+        "optimizer_name": opt_name,
+        "num_fc_layers": num_fc_layers,
+        "neurons_fc": neurons_fc,
+        "use_batch_fc": use_batch_fc,
+        "use_dropout_fc": use_dropout_fc,
+        "dropout_rate_fc": dropout_rate_fc,
         "mc_dropout_enabled": mc_dropout_enabled,
-        "mc_dropout_rate": mc_dropout_rate
+        "mc_dropout_rate": mc_dropout_rate,
+        "ee_epochs": eeg_epochs
     }
     mlflow.log_params(params)
 
@@ -129,10 +141,14 @@ def objective(trial, fixed_params):
                        "cnn_units": cnn_units,
                        "depth": depth,
                        "max_kernel_size": max_kernel_size,
-                       "fc_act": fc_act,
-                       "fc_batch": fc_batch,
                        "mc_dropout_enabled": mc_dropout_enabled,
-                       "mc_dropout_rate": mc_dropout_rate
+                       "mc_dropout_rate": mc_dropout_rate,
+                       "optimizer_name": opt_name,
+                       "num_fc_layers": num_fc_layers,
+                       "neurons_fc": neurons_fc,
+                       "use_batch_fc": use_batch_fc,
+                       "use_dropout_fc": use_dropout_fc,
+                       "dropout_rate_fc": dropout_rate_fc,
                        }
 
     classifier = MainClassifier(model_name=model_name, **hyperparameters)
@@ -203,7 +219,7 @@ def main():
     save_path: str = parameters.pop("save_path")
     model_name: str = parameters.get("classifier_name")
 
-    metric:str = "loss"
+    metric: str = "loss"
 
     if metric not in ("loss", "accuracy", "auc", "mcc"):
         raise ValueError("metric must be either 'loss', 'accuracy', 'auc', 'mcc'!")
@@ -234,13 +250,12 @@ def main():
         "direction": direction,
         "metric": metric
     }
-
-    experiment_name = "optuna_search_2"
+    experiment_name = "optuna_200924"
     prepare_experiment_environment(experiment_name=experiment_name)
     with mlflow.start_run(run_name=experiment_name):
         study = optuna.create_study(study_name="hyper_search", direction=fixed_params["direction"])
         # Optimization
-        study.optimize(lambda trial: objective(trial, fixed_params), n_trials=75)
+        study.optimize(lambda trial: objective(trial, fixed_params), n_trials=250)
 
         # Log the best parameters
         for k, v in study.best_params.items():

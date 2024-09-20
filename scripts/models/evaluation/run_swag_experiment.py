@@ -29,7 +29,7 @@ from eegDlUncertainty.models.classifiers.main_classifier import SWAGClassifier
 
 
 def main():
-    experiement = "SWAG_ensemble"
+    experiement = "SWAG_ensemble_final"
     #########################################################################################################
     # Get arguments and read config file
     #########################################################################################################
