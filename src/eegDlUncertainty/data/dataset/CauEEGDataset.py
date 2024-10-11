@@ -58,7 +58,6 @@ class CauEEGDataset:
                            f"potential datasets are: {os.listdir(config.get('base_dataset_path'))}")
 
         self._ageScaler = AgeScaler(dataset_dict=self._merged_splits, scaling_type=age_scaling)
-        self._epochs = epochs
         self._overlapping_epochs = overlapping_epochs
         self._eeg_len = int(eeg_len_seconds * self.get_eeg_info()['sfreq'])
         self._num_seconds = eeg_len_seconds
@@ -70,6 +69,13 @@ class CauEEGDataset:
         else:
             # In the case of spread or random the number of epochs is set to half of the maximum
             self._epochs = int(maximum_epochs / 2)
+
+        if self._epochs > 5:
+            self._num_val_epochs = 5
+        elif self._epochs == 1:
+            self._num_val_epochs = 1
+        else:
+            self._num_val_epochs = self._epochs - 1
 
         self._epoch_structure = epochs
         self._eeg_info = self.get_eeg_info()
@@ -310,7 +316,7 @@ class CauEEGDataset:
         val_subjects = tuple(self._val_split)
         test_subjects = tuple(self._test_split)
 
-        # Verifies that all subjects in the various sets actaully are present in the folder, else remove them fro split
+        # Verifies that all subjects in the various sets actually are present in the folder, else remove them from split
         train_subjects = verify_split_subjects(train_subjects, path=self.dataset_path)
         val_subjects = verify_split_subjects(val_subjects, path=self.dataset_path)
         test_subjects = verify_split_subjects(test_subjects, path=self.dataset_path)
@@ -358,8 +364,11 @@ class CauEEGDataset:
         This method relies on internal attributes such as `_task_name`, `_prediction_type`,
         and others to determine the appropriate processing of class labels for the subjects.
         """
-        if split != "train":
+        if split == "test":
             class_labels = np.array([self._merged_splits[sub]['class_label'] for sub in subjects])
+        elif split == "val":
+            class_labels = np.array([self._merged_splits[sub]['class_label'] for sub in subjects])
+            class_labels = np.repeat(class_labels, self._num_val_epochs)
         else:
             # Repeat the classes num_epochs times....
             class_labels = np.array([self._merged_splits[sub]['class_label'] for sub in subjects])
@@ -430,8 +439,10 @@ class CauEEGDataset:
         >>> self.load_eeg_data(('subject1', 'subject2'), plot=True)
         # This will load the EEG data for 'subject1' and 'subject2', plot the raw data, and return the data array.
         """
-        if split != "train":
+        if split == "test":
             num_epochs = 1
+        elif split == "val":
+            num_epochs = self._num_val_epochs
         else:
             num_epochs = self._epochs
         use_epochs = False
@@ -467,8 +478,15 @@ class CauEEGDataset:
                 epoch_npy_data = epochs.get_data(copy=False)
 
                 # Select the first epochs for test and val
-                if split != "train":
+                if split == "test":
                     npy_data = epoch_npy_data[:num_epochs, :, :]
+                elif split == "val":
+                    max_num_epochs, _, _ = epoch_npy_data.shape
+                    # Spread out the epochs maximally
+                    indices = np.linspace(0, max_num_epochs - 1, num_epochs)
+                    indices = np.round(indices).astype(int)
+                    indices = np.unique(indices)
+                    npy_data = epoch_npy_data[indices, :, :]
                 else:
                     max_num_epochs, _, _ = epoch_npy_data.shape
 
@@ -509,7 +527,7 @@ class CauEEGDataset:
         pbar.close()
         return data
 
-    def load_ages(self, subjects: Tuple[str, ...], add_noise=False):
+    def load_ages(self, subjects: Tuple[str, ...], split, add_noise=False, noise_level=0.1) -> numpy.ndarray:
         """ Load age of the subjects.
 
         This function receives a tuple of subject IDs, it loops through these subjects and extracts the age from
@@ -517,6 +535,9 @@ class CauEEGDataset:
 
         Parameters
         ----------
+        split
+        noise_level
+        add_noise
         subjects: Tuple[str, ...]
             Subject IDs
 
@@ -525,12 +546,15 @@ class CauEEGDataset:
         data: np.ndarray
             structure = [60, 65, 70, ..., n_subjects], shape=(n_subjects, 1)
         """
-        transformed_ages = self._ageScaler.transform(sub_ids=subjects, add_noise=add_noise)
-
-        if self._epochs == 1:
-            return transformed_ages
+        transformed_ages = self._ageScaler.transform(sub_ids=subjects, add_noise=add_noise, noise_level=noise_level)
+        
+        if split == "test":
+            num_epochs = 1
+        elif split == "val":
+            num_epochs = self._num_val_epochs
         else:
-            return np.repeat(transformed_ages, self._epochs)
+            num_epochs = self._epochs
+        return np.repeat(transformed_ages, num_epochs)
 
     @staticmethod
     def __normalize_data(x):

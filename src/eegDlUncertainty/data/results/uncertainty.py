@@ -99,6 +99,7 @@ def brier_score(probs, targets):
 
 
 def get_uncertainty_metrics(probs, targets):
+    print(probs.shape, targets.shape)
     return {'brier': brier_score(probs=probs, targets=targets),
             'nll': nll(probs=probs, targets=targets),
             'ece': ece(probs=probs, targets=targets).numpy().item(),

@@ -133,13 +133,29 @@ class MainClassifier(abc.ABC, nn.Module):
         best_loss = 1_000_000
         optimizer_name = kwargs.pop("optimizer_name", "adam")
 
+        # Set default parameters and update from kwargs if available
         if optimizer_name == "sgd":
-            optimizer = torch.optim.SGD(self.classifier.parameters(), lr=self._learning_rate, momentum=0.9,
-                                        nesterov=True)
+            lr = kwargs.pop("lr", self._learning_rate)
+            momentum = kwargs.pop("momentum", 0.9)
+            nesterov = kwargs.pop("nesterov", True)
+            optimizer = torch.optim.SGD(self.classifier.parameters(), lr=lr, momentum=momentum, nesterov=nesterov)
+
         elif optimizer_name == "adam":
-            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=self._learning_rate)
+            lr = kwargs.pop("lr", self._learning_rate)
+            betas = kwargs.pop("betas", (0.9, 0.999))
+            eps = kwargs.pop("eps", 1e-08)
+            weight_decay = kwargs.pop("weight_decay", 0)
+            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, betas=betas, eps=eps,
+                                         weight_decay=weight_decay)
+
         elif optimizer_name == "nadam":
-            optimizer = torch.optim.NAdam(self.classifier.parameters(), lr=self._learning_rate)
+            lr = kwargs.pop("lr", self._learning_rate)
+            betas = kwargs.pop("betas", (0.9, 0.999))
+            eps = kwargs.pop("eps", 1e-08)
+            weight_decay = kwargs.pop("weight_decay", 0)
+            optimizer = torch.optim.NAdam(self.classifier.parameters(), lr=lr, betas=betas, eps=eps,
+                                          weight_decay=weight_decay)
+
         else:
             raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 

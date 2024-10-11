@@ -9,13 +9,16 @@ from eegDlUncertainty.data.dataset.OODDataset import BaseDataset
 
 class CauDataGenerator(Dataset):  # type: ignore[type-arg]
     def __init__(self, subjects: Tuple[str, ...], split: str, dataset: CauEEGDataset, use_age: bool,
-                 device: Optional[torch.device] = None):
+                 device: Optional[torch.device] = None, add_noise: bool = False, noise_level: float = 0.1):
         super().__init__()
         self._use_age = use_age
         if split == "train":
-            self.ages = torch.tensor(dataset.load_ages(subjects=subjects, add_noise=False), dtype=torch.float32)
+            self.ages = torch.tensor(dataset.load_ages(subjects=subjects, split=split,
+                                                       add_noise=add_noise, noise_level=noise_level),
+                                     dtype=torch.float32)
         else:
-            self.ages = torch.tensor(dataset.load_ages(subjects=subjects), dtype=torch.float32)
+            self.ages = torch.tensor(dataset.load_ages(subjects=subjects, split=split), dtype=torch.float32)
+
         self._x = torch.tensor(dataset.load_eeg_data(subjects=subjects, split=split), dtype=torch.float32)
         targets = torch.tensor(dataset.load_targets(subjects=subjects, split=split, get_stats=True), dtype=torch.float32)
 

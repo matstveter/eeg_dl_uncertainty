@@ -1,0 +1,34 @@
+{
+  "test_with_test_set": false,
+  "result_folder": "/home/tvetern/PhD/dl_uncertainty/results",
+  "optuna": "SWAG",
+  "model": {
+    "name": "InceptionNetwork",
+    "epochs": 500,
+    "earlystopping": 150,
+    "depth": 3,
+    "cnn_units": 40,
+    "max_kernel_size": 30,
+    "num_fc_layers": 2,
+    "neurons_fc": 64,
+    "use_batch_fc": false,
+    "use_dropout_fc": false,
+    "dropout_rate_fc": 0.5
+  },
+  "hyperparameters": {
+    "learning_rate": 0.0001,
+    "batch_size": 64,
+    "augmentations": [],
+    "augment_prob": 0.6
+  },
+  "data": {
+    "prediction": "dementia",
+    "overlap": false,
+    "version": 1,
+    "eeg_epochs": "all", 
+    "overlapping_epochs": false,
+    "use_age": true, 
+    "age_scaling": "min_max",
+    "num_seconds": 30
+  }
+}

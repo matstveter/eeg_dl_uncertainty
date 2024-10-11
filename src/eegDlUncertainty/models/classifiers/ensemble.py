@@ -156,7 +156,6 @@ class Ensemble(torch.nn.Module):
 
         class_uncertainty = compute_classwise_uncertainty(all_probs=all_predictions, mean_probs=probs,
                                                           one_hot_target=target_one_hot, targets=target_class)
-
         results = {"performance": performance, "uncertainty": uncertainty, "class_uncertainty": class_uncertainty,
                    "predictions": prediction_dict}
 

@@ -13,21 +13,20 @@ class AgeScaler:
         for k, v in dataset_dict.items():
             age_list.append(v['age'])
         ages = np.array(age_list)
+        print("Ages shape: ", ages.shape)
 
         self._no_transformation = False
         if scaling_type == "min_max":
             self._min = np.min(ages)
             self._max = np.max(ages)
         elif scaling_type == "sklearn_scale":
+            ages_reshaped = ages.reshape(-1, 1)  # Reshape to 2D array for sklearn
             self._scaler = StandardScaler()
-            self._scaler.fit(ages)
-        elif scaling_type == "standard":  # Standard scaling as default
-            self._mean = np.mean(ages)
-            self._std = np.std(ages)
+            self._scaler.fit(ages_reshaped)
         else:
-            self._no_transformation = True
+            raise ValueError("Invalid scaling type. Choose from 'min_max', 'sklearn_scale'.")
 
-    def transform(self, sub_ids, add_noise=False, noise_level=0.05):
+    def transform(self, sub_ids, add_noise=False, noise_level=0.1):
         transformed_ages = []
         for sub in sub_ids:
             age = self._dataset_dict[sub]['age']
@@ -36,18 +35,30 @@ class AgeScaler:
             else:
                 if self._scaling_type == "min_max":
                     scaled_age = (age - self._min) / (self._max - self._min)
-                elif self._scaling_type == "sklearn_scale":
-                    scaled_age = self._scaler.transform(age)
                 else:
-                    scaled_age = (age - self._mean) / self._std
+                    scaled_age = self._scaler.transform(np.array([[age]]))[0][0]  # Transform expects 2D input
 
-                if add_noise and self._scaling_type == "min_max":
+                if add_noise:
                     # Inject Gaussian noise
-                    noise = np.random.normal(0, noise_level * scaled_age)
+                    noise = np.random.normal(0, noise_level * abs(scaled_age))
                     scaled_age += noise
+                    print("Noise: ", noise)
 
             transformed_ages.append(scaled_age)
         return np.array(transformed_ages)
+    
+    def inverse_transform(self, scaled_ages):
+        original_ages = []
+        for scaled_age in scaled_ages:
+            if self._no_transformation:
+                original_age = scaled_age
+            else:
+                if self._scaling_type == "min_max":
+                    original_age = scaled_age * (self._max - self._min) + self._min
+                else:
+                    original_age = self._scaler.inverse_transform(np.array([[scaled_age]]))[0][0]
+            original_ages.append(original_age)
+        return np.array(original_ages)
 
 
 def verify_split_subjects(subject_list, path):

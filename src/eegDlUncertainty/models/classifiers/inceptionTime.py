@@ -207,8 +207,8 @@ class InceptionNetwork(BaseClassifier):
         activation: Optional[Callable] = kwargs.get("activation")
         max_kernel_size: int = kwargs.get("max_kernel_size", 40)
         use_residual: bool = kwargs.get("use_residual", True)
-        mc_dropout_enabled: bool = kwargs.get("mc_dropout_enabled")
-        mc_dropout_rate: float = kwargs.get("mc_dropout_rate")
+        mc_dropout_enabled: bool = kwargs.get("mc_dropout_enabled", False)
+        mc_dropout_rate: float = kwargs.get("mc_dropout_rate", 0.25)
 
         # Model specific values
         num_fc_layers = kwargs.get("num_fc_layers", 1)
@@ -284,19 +284,7 @@ class InceptionNetwork(BaseClassifier):
                 current_neurons = next_neurons
 
         fc_network.append(nn.Linear(in_features=current_neurons, out_features=num_classes))
-        print(fc_network)
         self._fc_network = nn.Sequential(*fc_network)
-
-        # self._fc_layer = nn.Linear(in_features=output_channels,
-        #                            out_features=num_classes)
-        # self._fc_one_layer_age = nn.Linear(in_features=output_channels + 1, out_features=num_classes)
-        #
-        # self._fc_layer_age = nn.Linear(in_features=output_channels + 1, out_features=8)
-        #
-        # self._batch = nn.BatchNorm1d(8)
-        # self._fc_layer_last = nn.Linear(in_features=8, out_features=num_classes)
-        # self._act = nn.ReLU()
-        # self._dropout = nn.Dropout(p=0.3)
 
     def forward(self, input_tensor: torch.Tensor) -> torch.Tensor:
         """
@@ -343,18 +331,6 @@ class InceptionNetwork(BaseClassifier):
                 age = age.view(-1, 1)
             # Concatenate age along the feature dimension
             x = torch.cat((x, age), dim=1)
-
-            # if self.use_fc_drop:
-            #     x = self._fc_layer_age(x)
-            #     x = self._dropout(x)
-            #     if self.use_batch:
-            #         x = self._batch(x)
-            #     if self.use_act:
-            #         x = self._act(x)
-            #     x = self._fc_layer_last(x)
-            # else:
-            #     x = self._fc_one_layer_age(x)
-            # return x
 
             return self._fc_network(x)
 

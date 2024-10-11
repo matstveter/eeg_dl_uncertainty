@@ -7,7 +7,7 @@ from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenera
 from eegDlUncertainty.data.data_generators.ExplainabilityFrequencyGenerator import ExplainabilityFrequencyGenerator
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
 from eegDlUncertainty.data.results.history import History
-from eegDlUncertainty.experiments.utils_exp import get_baseparameters_from_config
+from eegDlUncertainty.experiments.utils_exp import get_parameters_from_config
 from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
 
 
@@ -23,7 +23,7 @@ def main():
         if p.endswith(".json"):
             config_path = os.path.join(args.result_folder, p)
 
-    parameters = get_baseparameters_from_config(config_path=config_path)
+    parameters = get_parameters_from_config(config_path=config_path)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model_path = os.path.join(args.result_folder, "model", f"{parameters['classifier_name']}_model")
 
