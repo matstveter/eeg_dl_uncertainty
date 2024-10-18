@@ -70,12 +70,10 @@ class CauEEGDataset:
             # In the case of spread or random the number of epochs is set to half of the maximum
             self._epochs = int(maximum_epochs / 2)
 
-        if self._epochs > 5:
-            self._num_val_epochs = 5
-        elif self._epochs == 1:
-            self._num_val_epochs = 1
+        if self._epochs > 1:
+            self._num_val_epochs = 2
         else:
-            self._num_val_epochs = self._epochs - 1
+            self._num_val_epochs = 1
 
         self._epoch_structure = epochs
         self._eeg_info = self.get_eeg_info()
@@ -483,9 +481,9 @@ class CauEEGDataset:
                 elif split == "val":
                     max_num_epochs, _, _ = epoch_npy_data.shape
                     # Spread out the epochs maximally
-                    indices = np.linspace(0, max_num_epochs - 1, num_epochs)
+                    indices = np.linspace(0, max_num_epochs - 1, num_epochs + 1)
                     indices = np.round(indices).astype(int)
-                    indices = np.unique(indices)
+                    indices = np.unique(indices)[:-1]
                     npy_data = epoch_npy_data[indices, :, :]
                 else:
                     max_num_epochs, _, _ = epoch_npy_data.shape

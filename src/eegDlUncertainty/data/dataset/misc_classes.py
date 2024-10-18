@@ -13,7 +13,6 @@ class AgeScaler:
         for k, v in dataset_dict.items():
             age_list.append(v['age'])
         ages = np.array(age_list)
-        print("Ages shape: ", ages.shape)
 
         self._no_transformation = False
         if scaling_type == "min_max":
@@ -42,7 +41,6 @@ class AgeScaler:
                     # Inject Gaussian noise
                     noise = np.random.normal(0, noise_level * abs(scaled_age))
                     scaled_age += noise
-                    print("Noise: ", noise)
 
             transformed_ages.append(scaled_age)
         return np.array(transformed_ages)

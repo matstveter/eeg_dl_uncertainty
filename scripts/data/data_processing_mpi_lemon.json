@@ -1,12 +1,13 @@
 {
   "preprocessing": {
-    "low_freq": 2.0,
+    "low_freq": 1.0,
     "high_freq": 45,
     "num_seconds_per_subject": 100,
     "sfreq": 200,
     "start": 30,
     "autoreject": true,
-    "autoreject_epochs": 5
+    "autoreject_epochs": 30,
+    "use_notch": true
   },
   "file_paths": {
     "eeg_data": "/media/hdd/mpi_lemon/",

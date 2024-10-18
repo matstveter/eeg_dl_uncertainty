@@ -1,5 +1,6 @@
 import argparse
 import os
+import pickle
 import random
 
 import mlflow
@@ -17,6 +18,18 @@ from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_
     setup_experiment_path
 from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
 
+study_name = "hyper_search_test"
+optuna_dir = "/home/tvetern/PhD/dl_uncertainty/optuna_dir/"
+pickle_file_path = os.path.join(optuna_dir, f"{study_name}.pkl")
+save_frequency = 5
+
+
+def save_study(study, trial):
+    if trial.number % save_frequency == 0:
+        with open(pickle_file_path, "wb") as f:
+            pickle.dump(study, f)
+        print(f"\n\nStudy saved at trial number: {trial.number}\n\n")
+
 
 def objective(trial, fixed_params):
     print("Running experiment number: ", trial.number)
@@ -32,6 +45,7 @@ def objective(trial, fixed_params):
     earlystopping: int = fixed_params["earlystopping"]
     config_path: str = fixed_params.get("config_path")
     metric: str = fixed_params.get("metric")
+    num_seconds = 30
 
     # Define random state and device
     random_state: int = 42
@@ -44,50 +58,56 @@ def objective(trial, fixed_params):
     mlflow.start_run(run_name=f"run_{str(trial.number)}", nested=True)
     run_path = create_run_folder(path=save_path, index=str(trial.number))
 
-    cnn_units = trial.suggest_int("cnn_units", 10, 120)
-    max_kernel_size = trial.suggest_int("max_kernel_size", 10, 120)
-    depth = trial.suggest_int("depth", 3, 15, step=3)
-    num_fc_layers = trial.suggest_int("num_fc_layers", 1, 7)
+    cnn_units = trial.suggest_int("cnn_units", 10, 90)
+    max_kernel_size = trial.suggest_int("max_kernel_size", 10, 120, step=10)
+    depth = trial.suggest_int("depth", 3, 12, step=3)
+    num_fc_layers = trial.suggest_int("num_fc_layers", 1, 5)
     neurons_fc = trial.suggest_categorical("neurons_fc", [256, 128, 64, 32, 16, 8])
     use_batch_fc = trial.suggest_categorical("use_batch_fc", [True, False])
     use_dropout_fc = trial.suggest_categorical("use_dropout_fc", [True, False])
-    dropout_rate_fc = trial.suggest_float("dropout_rate_fc", 0.1, 0.5, step=0.1)
-    num_seconds = trial.suggest_categorical("num_seconds", [1, 5, 10, 15, 30])
+
+    if use_dropout_fc:
+        dropout_rate_fc = round(trial.suggest_float("dropout_rate_fc", 0.1, 0.5, step=0.1), 1)
+    else:
+        dropout_rate_fc = 0.0
 
     add_age_noise = trial.suggest_categorical("add_age_noise", [True, False])
-    age_scaling_noise_level = trial.suggest_float("age_scaling_noise_level", 0.01, 0.5, step=0.01)
-    eeg_epochs = trial.suggest_categorical("eeg_epochs", ["all", "spread"])
     age_scaling = trial.suggest_categorical("age_scaling", ["min_max", "sklearn_scale"])
 
-    optimizer_name = trial.suggest_categorical("optimizer_name", ["sgd", "adam", "nadam"])
-    optim_kwargs = {"optimizer_name": optimizer_name}
+    if add_age_noise:
+        age_scaling_noise_level = trial.suggest_categorical("age_scaling_noise_level", [0.01, 0.05, 0.1, 0.25, 0.5])
+    else:
+        age_scaling_noise_level = 0.0
 
-    if optimizer_name == "sgd":
-        optim_kwargs["lr"] = trial.suggest_float("lr", 1e-5, 1e-1, log=True)
-        optim_kwargs["momentum"] = trial.suggest_float("momentum", 0.5, 0.99)
-        optim_kwargs["nesterov"] = trial.suggest_categorical("nesterov", [True, False])
+    eeg_epochs = trial.suggest_categorical("eeg_epochs", ["all", "spread"])
+    use_autoreject = trial.suggest_categorical("use_autoreject", [True, False])
 
-    elif optimizer_name == "adam":
-        optim_kwargs["lr"] = trial.suggest_float("lr", 1e-5, 1e-1, log=True)
-        optim_kwargs["betas"] = (trial.suggest_float("beta1", 0.8, 0.99), trial.suggest_float("beta2", 0.9, 0.999))
-        optim_kwargs["eps"] = trial.suggest_float("eps", 1e-10, 1e-7, log=True)
-        optim_kwargs["weight_decay"] = trial.suggest_float("weight_decay", 0, 0.1)
+    if use_autoreject:
+        dataset_version = 2
+    else:
+        dataset_version = 1
 
-    elif optimizer_name == "nadam":
-        optim_kwargs["lr"] = trial.suggest_float("lr", 1e-5, 1e-1, log=True)
-        optim_kwargs["betas"] = (trial.suggest_float("beta1", 0.8, 0.99), trial.suggest_float("beta2", 0.9, 0.999))
-        optim_kwargs["eps"] = trial.suggest_float("eps", 1e-10, 1e-7, log=True)
-        optim_kwargs["weight_decay"] = trial.suggest_float("weight_decay", 0, 0.1)
-
-    dataset_version = 1
+    # optimizer_name = trial.suggest_categorical("optimizer_name", ["sgd", "adam", "nadam"])
+    # optim_kwargs = {"optimizer_name": optimizer_name}
+    #
+    # if optimizer_name == "sgd":
+    #     optim_kwargs["lr"] = trial.suggest_categorical("lr", [1e-6, 1e-5, 1e-4, 1e-3, 1e-2])
+    #     optim_kwargs["momentum"] = trial.suggest_float("momentum", 0.8, 0.95)
+    #     optim_kwargs["nesterov"] = trial.suggest_categorical("nesterov", [True, False])
+    #
+    # elif optimizer_name in ["adam", "nadam"]:  # Adam and Nadam share the same parameters
+    #     optim_kwargs["lr"] = trial.suggest_categorical("lr", [1e-6, 1e-5, 1e-4, 1e-3, 1e-2])
+    #     optim_kwargs["betas"] = (trial.suggest_float("beta1", 0.85, 0.95), trial.suggest_float("beta2", 0.98, 0.999))
+    #     optim_kwargs["eps"] = trial.suggest_float("eps", 1e-8, 1e-7, log=True)
+    #     optim_kwargs["weight_decay"] = round(trial.suggest_float("weight_decay", 0, 0.1, step=0.01), 2)
 
     # Create a dictionary of the parameters
     params = {
+        "dataset_version": dataset_version,
         "cnn_units": cnn_units,
         "depth": depth,
-        "num_seconds": num_seconds,
         "max_kernel_size": max_kernel_size,
-        "optimizer_name": optim_kwargs,
+        # "optimizer_name": optim_kwargs,
         "num_fc_layers": num_fc_layers,
         "neurons_fc": neurons_fc,
         "use_batch_fc": use_batch_fc,
@@ -97,6 +117,7 @@ def objective(trial, fixed_params):
         "add_age_noise": add_age_noise,
         "age_scaling_noise_level": age_scaling_noise_level,
         "eeg_epochs": eeg_epochs,
+        "use_autoreject": use_autoreject
     }
     mlflow.log_params(params)
     print(params)
@@ -151,8 +172,7 @@ def objective(trial, fixed_params):
     try:
         classifier.fit_model(train_loader=train_loader, training_epochs=train_epochs, device=device,
                              loss_fn=criterion, earlystopping_patience=earlystopping,
-                             val_loader=val_loader, train_hist=train_history, val_history=val_history,
-                             **optim_kwargs)
+                             val_loader=val_loader, train_hist=train_history, val_history=val_history)
     except torch.cuda.OutOfMemoryError as e:
         mlflow.set_tag("Exception", "CUDA Out of Memory Error")
         mlflow.log_param("Exception Message", str(e))
@@ -186,6 +206,7 @@ def objective(trial, fixed_params):
 
 
 def main():
+
     #########################################################################################################
     # Get arguments and read config file
     #########################################################################################################
@@ -201,6 +222,21 @@ def main():
 
     config_path = os.path.join(os.path.dirname(__file__), "config_files", args.config_path)
     parameters = get_parameters_from_config(config_path=config_path)
+
+    #########################################################################################################
+    # Optuna specific variables
+    #########################################################################################################
+    if args.config_path == "test_conf.json":
+        experiment_name = "test"
+    else:
+        experiment_name = "optuna_final_hypersearch_5_0"
+
+    global study_name
+    global pickle_file_path
+
+    study_name = f"{experiment_name}.db"
+    pickle_file_path = os.path.join(optuna_dir, f"{study_name}.pkl")
+    stud_path = os.path.join(optuna_dir, f"{study_name}")
 
     #########################################################################################################
     # Init variables from config file
@@ -240,16 +276,24 @@ def main():
         "direction": direction,
         "metric": metric
     }
-    if args.config_path is None:
-        experiment_name = "test"
-    else:
-        experiment_name = "optuna_final_hypersearch_111024"
 
     prepare_experiment_environment(experiment_name=experiment_name)
     with mlflow.start_run(run_name=experiment_name):
-        study = optuna.create_study(study_name="hyper_search_test", direction=fixed_params["direction"])
+
+        # Create a study if it does not exist
+        if os.path.exists(pickle_file_path):
+            with open(pickle_file_path, "rb") as f:
+                study = pickle.load(f)
+            print(f"Study loaded from {pickle_file_path}")
+        else:
+            study = optuna.create_study(study_name="hyper_search_test", storage=f"sqlite:///{stud_path}",
+                                        direction=fixed_params["direction"])
         # Optimization
-        study.optimize(lambda trial: objective(trial, fixed_params), n_trials=1500)
+        study.optimize(lambda trial: objective(trial, fixed_params), n_trials=1500, callbacks=[save_study])
+
+        # Save the study
+        with open(pickle_file_path, "wb") as f:
+            pickle.dump(study, f)
 
         # Log the best parameters
         for k, v in study.best_params.items():

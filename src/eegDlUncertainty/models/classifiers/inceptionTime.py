@@ -259,6 +259,7 @@ class InceptionNetwork(BaseClassifier):
         # average pooling is implemented in
         # forward method)
         # -----------------------------
+
         fc_network = [nn.Linear(in_features=output_channels + 1, out_features=neurons_fc)]
 
         if use_batch_fc:
@@ -335,6 +336,7 @@ class InceptionNetwork(BaseClassifier):
             return self._fc_network(x)
 
         else:
+
             raise ValueError("Age must be provided")
 
 

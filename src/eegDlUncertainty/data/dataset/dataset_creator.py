@@ -2,9 +2,12 @@ import multiprocessing
 import os
 import shutil
 import time
+from tabnanny import verbose
+
 import autoreject
 from typing import Any, Dict, Tuple, Union
 
+import matplotlib.pyplot as plt
 import mne
 import numpy as np
 import pandas as pd
@@ -263,7 +266,9 @@ def process_eeg_file(sub_eeg, eeg_path, events, preprocess, nyquist, out_p, use_
     raw_eeg_data.crop(tmin=start_time, tmax=end_time, verbose=False, include_tmax=False)
 
     # Lowpass and high_pass filter the data
-    raw_eeg_data.notch_filter(freqs=50, verbose=False)
+    if preprocess['use_notch']:
+        raw_eeg_data.notch_filter(freqs=50, verbose=False)
+
     raw_eeg_data.filter(l_freq=preprocess['low_freq'], h_freq=preprocess['high_freq'], verbose=False)
 
     new_sampling_rate = raw_eeg_data.info['sfreq']
@@ -404,10 +409,16 @@ def create_tdbrain_dataset(config, conf_path):
                          "\nkey: 'eeg_data': path")
 
     data_info = pd.read_csv(os.path.join(eeg_path, "TDBRAIN_participants_V2.tsv"), sep='\t')
+    print(data_info)
+
+    if config['use_derivatives']:
+        eeg_path = os.path.join(eeg_path, "derivatives")
+
+    output_path = config['file_paths']['output_directory']
+    outp_path = create_output_folder(base_path=output_path)
 
     filtered_data = data_info[data_info['indication'] == "HEALTHY"]
 
-    outp_path = create_output_folder(base_path=config['file_paths']['output_directory'])
     desired_channels = get_cau_eeg_channels()
 
     ext = "ses-1/eeg/"
@@ -421,8 +432,21 @@ def create_tdbrain_dataset(config, conf_path):
     preprocess = config['preprocessing']
 
     for sub in filtered_data['participants_ID']:
-        eeg_file = os.path.join(eeg_path, sub, ext, f"{sub}_ses-1_task-restEC_eeg.vhdr")
-        raw = mne.io.read_raw_brainvision(vhdr_fname=eeg_file, preload=True, verbose=False)
+        if config['use_derivatives']:
+            eeg_file = os.path.join(eeg_path, sub, ext, f"{sub}_ses-1_task-restEC_eeg.csv")
+            eeg_df = pd.read_csv(eeg_file)
+            ch_names = eeg_df.columns.tolist()
+            ch_to_remove = ['VPVA', 'VNVB', 'HPHL', 'HNHR', 'Erbs', 'OrbOcc', 'Mass']
+            eeg_df.drop(columns=ch_to_remove, inplace=True)
+            # Convert to microvolts
+            data = eeg_df.to_numpy().T / 1e6
+            sfreq = 500
+            info = mne.create_info(ch_names=eeg_df.columns.tolist(), sfreq=sfreq, ch_types='eeg', verbose=False)
+            raw = mne.io.RawArray(data, info, verbose=False)
+        else:
+            eeg_file = os.path.join(eeg_path, sub, ext, f"{sub}_ses-1_task-restEC_eeg.vhdr")
+            raw = mne.io.read_raw_brainvision(vhdr_fname=eeg_file, preload=True, verbose=False)
+
         raw.rename_channels(rename_dict, verbose=False)
         raw.pick(desired_channels, verbose=False)
 
@@ -437,6 +461,11 @@ def create_tdbrain_dataset(config, conf_path):
             raw.crop(tmin=preprocess['start'],
                      tmax=raw.times[-1],
                      verbose=False, include_tmax=False)
+
+        # plot the power spectral density
+        if preprocess['use_notch']:
+            raw.notch_filter(freqs=50, verbose=False)
+            print("Applying notch filter")
 
         # Lowpass and high_pass filter the data
         raw.filter(l_freq=preprocess['low_freq'], h_freq=preprocess['high_freq'], verbose=False)
@@ -511,6 +540,12 @@ def create_greek_dataset(config, conf_path):
             raw.crop(tmin=preprocess['start'],
                      tmax=raw.times[-1],
                      verbose=False, include_tmax=False)
+
+        if preprocess['use_notch'] and not config['use_derivatives']:
+            # plot the power spectral density
+            raw.notch_filter(freqs=50, verbose=False)
+            raw.notch_filter(freqs=62.5, verbose=False)
+            print("Applying notch filter")
 
         # Lowpass and high_pass filter the data
         raw.filter(l_freq=preprocess['low_freq'], h_freq=preprocess['high_freq'], verbose=False)
@@ -596,8 +631,15 @@ def create_MPI_dataset(config, conf_path):
                          tmax=raw.times[-1],
                          verbose=False, include_tmax=False)
 
-            # Lowpass and high_pass filter the data
-            raw.filter(l_freq=preprocess['low_freq'], h_freq=preprocess['high_freq'], verbose=False)
+            if preprocess['use_notch']:
+                try:
+                    raw.notch_filter(freqs=50, verbose=False)
+                except ValueError:
+                    print(f"Skipping subject: {sub}")
+                    continue
+
+            # Lowpass and high_pass filter the data, using butterworth filter
+            raw.filter(l_freq=preprocess['low_freq'], h_freq=preprocess['high_freq'], verbose=False, )
             raw.resample(preprocess['sfreq'], verbose=False)
 
             raw.set_eeg_reference('average', verbose=False)

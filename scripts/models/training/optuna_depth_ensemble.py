@@ -61,8 +61,23 @@ def objective(trial, fixed_params):
     # Start mlflow run and create a folder for the current run
     mlflow.start_run(run_name=f"run_{str(trial.number)}", nested=True)
     run_path = create_run_folder(path=save_path, index=str(trial.number))
+    
+    cnn_units = trial.suggest_int("cnn_units", 10, 80, step=10)
+    max_kernel_size = trial.suggest_int("max_kernel_size", 10, 90, step=10)
+    num_fc_layers = trial.suggest_int("num_fc_layers", 1, 5)
+    neurons_fc = trial.suggest_categorical("neurons_fc", [8, 16, 32, 64, 128, 256])
+    use_batch_fc = trial.suggest_categorical("use_batch_fc", [True, False])
+    use_dropout_fc = trial.suggest_categorical("use_dropout_fc", [True, False])
 
-    params = {}
+    params = {
+        "cnn_units": cnn_units,
+        "max_kernel_size": max_kernel_size,
+        "num_fc_layers": num_fc_layers,
+        "neurons_fc": neurons_fc,
+        "use_batch_fc": use_batch_fc,
+        "use_dropout_fc": use_dropout_fc,
+        "dropout_rate_fc": dropout_rate_fc,
+    }
 
     mlflow.log_params(params)
 
@@ -72,11 +87,10 @@ def objective(trial, fixed_params):
     dataset = CauEEGDataset(dataset_version=dataset_version, targets=prediction, eeg_len_seconds=num_seconds,
                             epochs=eeg_epochs, overlapping_epochs=overlapping_epochs, age_scaling=age_scaling,
                             save_dir=run_path)
-    train_subjects, val_subjects, test_subjects = dataset.get_splits()
+    train_subjects, val_subjects, _ = dataset.get_splits()
     if "test" in config_path:
         train_subjects = train_subjects[0:10]
         val_subjects = val_subjects[0:10]
-        test_subjects = test_subjects[0:10]
 
     if dataset.num_classes == 1:
         criterion = torch.nn.BCEWithLogitsLoss()
@@ -90,8 +104,6 @@ def objective(trial, fixed_params):
                                  use_age=use_age)
     val_gen = CauDataGenerator(subjects=val_subjects, dataset=dataset, device=device, split="val",
                                use_age=use_age)
-    test_gen = CauDataGenerator(subjects=test_subjects, dataset=dataset, device=device, split="test",
-                                use_age=use_age)
     #########################################################################################################
     # Loaders
     #########################################################################################################
@@ -105,7 +117,6 @@ def objective(trial, fixed_params):
         train_loader = DataLoader(train_gen, batch_size=batch_size, shuffle=True)
 
     val_loader = DataLoader(val_gen, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_gen, batch_size=batch_size, shuffle=False)
 
     hyperparameters = {"in_channels": dataset.num_channels,
                        "num_classes": dataset.num_classes,
@@ -142,16 +153,10 @@ def objective(trial, fixed_params):
             return 0
 
     else:
-        if use_test_set:
-            evaluation_history = History(num_classes=dataset.num_classes, set_name="test",
-                                         loader_lenght=len(test_loader), save_path=run_path)
-            classifier.test_model(test_loader=test_loader, device=device, test_hist=evaluation_history,
-                                  loss_fn=criterion)
-        else:
-            evaluation_history = History(num_classes=dataset.num_classes, set_name="test_val",
-                                         loader_lenght=len(val_loader), save_path=run_path)
-            classifier.test_model(test_loader=val_loader, device=device, test_hist=evaluation_history,
-                                  loss_fn=criterion)
+        evaluation_history = History(num_classes=dataset.num_classes, set_name="test_val",
+                                     loader_lenght=len(val_loader), save_path=run_path)
+        classifier.test_model(test_loader=val_loader, device=device, test_hist=evaluation_history,
+                              loss_fn=criterion)
 
         train_history.save_to_mlflow()
         train_history.save_to_pickle()
@@ -233,12 +238,12 @@ def main():
         "use_dropout_fc": parameters.get("use_dropout_fc"),
         "dropout_rate_fc": parameters.get("dropout_rate_fc"),
     }
-    experiment_name = "optuna_031024"
+    experiment_name = "optuna_depth_ensemble"
     prepare_experiment_environment(experiment_name=experiment_name)
     with mlflow.start_run(run_name=experiment_name):
-        study = optuna.create_study(study_name="hyper_search", direction=fixed_params["direction"])
+        study = optuna.create_study(study_name="hyper_search" , direction=fixed_params["direction"])
         # Optimization
-        study.optimize(lambda trial: objective(trial, fixed_params), n_trials=250)
+        study.optimize(lambda trial: objective(trial, fixed_params), n_trials=15)
 
         # Log the best parameters
         for k, v in study.best_params.items():
