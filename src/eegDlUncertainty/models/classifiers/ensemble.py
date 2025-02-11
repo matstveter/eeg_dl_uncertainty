@@ -1,10 +1,10 @@
 from typing import List
 
-import torch
 import mlflow
+import torch
 
 from eegDlUncertainty.data.results.uncertainty import calculate_performance_metrics, compute_classwise_uncertainty, \
-    get_more_metrics, get_uncertainty_metrics
+    get_uncertainty_metrics
 from eegDlUncertainty.data.utils import save_dict_to_pickle
 
 
@@ -20,7 +20,6 @@ class Ensemble(torch.nn.Module):
             self.method = "single"
 
         self.temperature = torch.nn.Parameter(torch.ones(1))
-
 
     def forward(self, x, apply_mean=True):
         """ Forward pass of the ensemble model. The output is the average of the logits of the classifiers.

@@ -116,9 +116,18 @@ def main():
     train_loader_list = []
     num_augmentations = ['timereverse', 'signflip', 'ftsurrogate', 'channelsshuffle',
                          'channelsdropout', 'smoothtimemask', 'bandstopfilter']
+
+    other_args = {'timereverse': {},
+                  'signflip': {},
+                  'ftsurrogate': {'phase_noise_magnitude': 0.2, 'channel_indep': True},
+                  'channelsshuffle': {'p_shuffle': 0.1},
+                  'channelsdropout': {'p_drop': 0.4},
+
+                  }
+
     for aug in num_augmentations:
         train_augmentations = get_augmentations(aug_names=[aug], probability=augmentation_prob,
-                                                random_state=random_state)
+                                                random_state=random_state, **other_args)
         train_loader_list.append(AugmentedDataLoader(dataset=train_gen, transforms=train_augmentations, device=device,
                                                      batch_size=batch_size, shuffle=True))
 

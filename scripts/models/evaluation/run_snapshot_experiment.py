@@ -1,12 +1,8 @@
 import argparse
 import os
-import random
-from typing import List, Optional, Union
 
 import mlflow
-import numpy
 import torch
-from braindecode.augmentation import AugmentedDataLoader
 from torch.utils.data import DataLoader
 
 from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
@@ -39,59 +35,60 @@ def main():
 
     config_path = os.path.join(os.path.dirname(__file__), "config_files", args.config_path)
     parameters = get_parameters_from_config(config_path=config_path)
-
+    
     #########################################################################################################
     # Init variables from config file
     #########################################################################################################
     param = parameters.copy()
-    use_test_set: bool = parameters.pop("use_test_set", False)
     save_path: str = parameters.pop("save_path")
-    run_name: str = args.run_name
-
-    # Data related variables
-    dataset_version: int = parameters.pop("dataset_version")
+    model_name: str = parameters.get("classifier_name")
     prediction: str = parameters.pop("prediction")
+    dataset_version: int = parameters.pop("dataset_version")
+    eeg_epochs = parameters.get('eeg_epochs')
+    overlapping_epochs: bool = parameters.pop("epoch_overlap", False)
+    num_seconds: int = parameters.pop("num_seconds")
     use_age: bool = parameters.pop("use_age")
     age_scaling: str = parameters.pop("age_scaling")
-    num_seconds: int = parameters.pop("num_seconds")
-    eeg_epochs: str = parameters.pop("eeg_epochs")
-    overlapping_epochs: bool = parameters.pop("epoch_overlap", False)
-
-    # Augmentation related information
-    augmentations: List[Union[str, None]] = parameters.pop("augmentations")
-    augmentation_prob: Optional[float] = parameters.pop("augmentation_prob", 0.2)
-
-    # Model training
-    model_name: str = parameters.get("classifier_name")
-    train_epochs: int = parameters.pop("training_epochs")
-    batch_size: int = parameters.pop("batch_size")
     learning_rate: float = parameters.pop("learning_rate")
+    batch_size: int = parameters.pop("batch_size")
+    train_epochs: int = parameters.pop("training_epochs")
     earlystopping: int = parameters.pop("earlystopping")
-    
-    # General variables
-    model_p = {
-        'depth': parameters.pop("depth"),
-        'cnn_units': parameters.pop("cnn_units"),
-        'max_kernel_size': parameters.pop("max_kernel_size")
-    }
 
-    # For the snapshot ensemble
-    snapshot_cycle_epochs: int = parameters.pop("snapshot_cycle_epochs")
-    snapshot_num_cycles: int = parameters.pop("snapshot_num_cycles")
-    snapshot_start_lr: float = parameters.pop("snapshot_lr")
-    snapshot_use_best_model: bool = parameters.pop("snapshot_use_best_model")
+    #########################################################################################################
+    # Fixed parameters
+    #########################################################################################################
+    age_noise_prob = 0.75
+    age_noise_level = 0.05
+    augmentations = ['timereverse', 'smoothtimemask']
+    other_parameters = {'smoothtimemask': {'mask_len_samples': 20}}
+    augmentation_prob = 0.5
 
-    random_state: int = 42
+    #########################################################################################################
+    # Normal parameters
+    #########################################################################################################
+    depth: int = parameters.get("depth")
+    cnn_units = parameters.get("cnn_units")
+    max_kernel_size = parameters.get("max_kernel_size")
+    num_fc_layers = parameters.get("num_fc_layers")
+    neurons_fc = parameters.get("neurons_fc")
+    use_batch_fc = parameters.get("use_batch_fc")
+    use_dropout_fc = parameters.get("use_dropout_fc")
+    dropout_rate_fc = parameters.get("dropout_rate_fc")
+
+    #########################################################################################################
+    # Snapshot parameters
+    #########################################################################################################
+    epochs_per_cycle = 50
+    num_cycles = 15
+    start_lr = 0.0001
+    #########################################################################################################
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    random.seed(random_state)
-    numpy.random.seed(random_state)
-    torch.manual_seed(random_state)
-
-    experiment_path, folder_name = setup_experiment_path(save_path=save_path,
-                                                         config_path=config_path,
+    experiment_path, folder_name = setup_experiment_path(save_path=save_path, config_path=config_path,
                                                          experiment=experiment)
     experiment_name = f"{experiment}_experiments"
     prepare_experiment_environment(experiment_name=experiment_name)
+
     #########################################################################################################
     # Dataset
     #########################################################################################################
@@ -105,31 +102,30 @@ def main():
         val_subjects = val_subjects[0:25]
         test_subjects = test_subjects[0:20]
 
-    if dataset.num_classes == 1:
-        criterion = torch.nn.BCEWithLogitsLoss()
-    else:
-        criterion = torch.nn.CrossEntropyLoss()
     #########################################################################################################
-    # Generators
+    # Loss function
     #########################################################################################################
-    train_gen = CauDataGenerator(subjects=train_subjects, dataset=dataset, device=device, split="train",
-                                 use_age=use_age)
-    val_gen = CauDataGenerator(subjects=val_subjects, dataset=dataset, device=device, split="val", use_age=use_age)
-    test_gen = CauDataGenerator(subjects=test_subjects, dataset=dataset, device=device, split="test", use_age=use_age)
+    weight_tensor = dataset.get_class_weights(subjects=train_subjects, normalize=True)
+    weight_tensor = weight_tensor.to(device)
+    criterion = torch.nn.CrossEntropyLoss(weight=weight_tensor)
 
     #########################################################################################################
-    # Loaders
+    # Generators and loaders
     #########################################################################################################
 
     if augmentations:
         train_augmentations = get_augmentations(aug_names=augmentations, probability=augmentation_prob,
-                                                random_state=random_state)
-        # noinspection PyTypeChecker
-        train_loader = AugmentedDataLoader(dataset=train_gen, transforms=train_augmentations, device=device,
-                                           batch_size=batch_size, shuffle=True)
+                                                **other_parameters)
     else:
-        train_loader = DataLoader(train_gen, batch_size=batch_size, shuffle=True)
+        train_augmentations = []
 
+    train_gen = CauDataGenerator(subjects=train_subjects, dataset=dataset, device=device, split="train",
+                                 use_age=use_age, augmentations=train_augmentations,
+                                 age_noise_prob=age_noise_prob, age_noise_level=age_noise_level)
+    val_gen = CauDataGenerator(subjects=val_subjects, dataset=dataset, device=device, split="val", use_age=use_age)
+    test_gen = CauDataGenerator(subjects=test_subjects, dataset=dataset, device=device, split="test", use_age=use_age)
+
+    train_loader = DataLoader(train_gen, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_gen, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_gen, batch_size=batch_size, shuffle=False)
 
@@ -149,8 +145,16 @@ def main():
                                "num_classes": dataset.num_classes,
                                "time_steps": dataset.eeg_len,
                                "save_path": run_path,
-                               "learning_rate": learning_rate}
-            hyperparameters.update(model_p)
+                               "learning_rate": learning_rate,
+                               "cnn_units": cnn_units,
+                               "depth": depth,
+                               "max_kernel_size": max_kernel_size,
+                               "num_fc_layers": num_fc_layers,
+                               "neurons_fc": neurons_fc,
+                               "use_batch_fc": use_batch_fc,
+                               "use_dropout_fc": use_dropout_fc,
+                               "dropout_rate_fc": dropout_rate_fc,
+                               }
             param.update(hyperparameters)
             add_config_information(config=param, dataset="CAUEEG")
 
@@ -163,10 +167,9 @@ def main():
                                                          earlystopping_patience=earlystopping,
                                                          val_loader=val_loader, train_hist=train_history,
                                                          val_history=val_history,
-                                                         start_lr=snapshot_start_lr,
-                                                         epochs_per_cycle=snapshot_cycle_epochs,
-                                                         use_best=snapshot_use_best_model,
-                                                         num_cycles=snapshot_num_cycles)
+                                                         start_lr=start_lr,
+                                                         epochs_per_cycle=epochs_per_cycle,
+                                                         num_cycles=num_cycles)
             except torch.cuda.OutOfMemoryError as e:
                 mlflow.set_tag("Exception", "CUDA Out of Memory Error")
                 mlflow.log_param("Exception Message", str(e))

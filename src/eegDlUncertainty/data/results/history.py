@@ -2,12 +2,12 @@ import os.path
 import pickle
 from typing import Any, Dict, List, Optional
 
-import matplotlib
+# import matplotlib
 import mlflow
 import numpy as np
 import seaborn as sns
 
-matplotlib.use('Agg')
+# matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import torch
 from sklearn.metrics import (roc_auc_score, f1_score, cohen_kappa_score, precision_score, recall_score,
@@ -168,7 +168,7 @@ class History:
               f"  F1: {self._f1[-1]:.2f}"
               f"  MCC: {self._mcc[-1]:.2f}  ", end="")
 
-    def on_epoch_end(self) -> None:
+    def on_epoch_end(self, plot=False) -> None:
         """ This functions updates the metrics, prints performance and prepares lists for the new epoch.
 
         This functions starts by calling the function self._update_metrics which updates the saved metrics with the
@@ -185,10 +185,38 @@ class History:
         if self.verbose:
             self.print_metrics()
 
+            if plot:
+                self.plot_predictions()
+
         if "test" not in self._set_name:
             self.epoch_y_true = []
             self.epoch_y_pred = []
             self.epoch_loss = 0
+
+    def plot_predictions(self):
+        y_pred = torch.tensor(self.epoch_y_pred)
+        y_true = torch.tensor(self.epoch_y_true)
+
+        _, y_pred = torch.max(y_pred, dim=1)
+        _, y_true = torch.max(y_true, dim=1)
+
+        # Convert predictions and true labels to numpy arrays for compatibility with sklearn
+        y_pred = y_pred.cpu().numpy()
+        y_true = y_true.cpu().numpy()
+
+        # Generate the confusion matrix
+        cm = confusion_matrix(y_true, y_pred, labels=[0, 1, 2])
+
+        # Plot the confusion matrix as a heatmap
+        plt.figure(figsize=(8, 6))
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', cbar=False,
+                    xticklabels=['Healthy', 'MCI', 'Dementia'],
+                    yticklabels=['Healthy', 'MCI', 'Dementia'])
+
+        plt.xlabel("Predicted Class")
+        plt.ylabel("True Class")
+        plt.title("Confusion Matrix of Model Predictions")
+        plt.savefig(f"{self._save_path}/{self._set_name}_predictions.png")
 
     def batch_stats(self, y_pred, y_true, loss) -> None:
         """ This function appends the batch stats to the epoch lists

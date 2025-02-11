@@ -271,7 +271,7 @@ def all_dataset_scatter_plots(probs_pred_list, target_classes_list, dataset_name
 
     # Assuming `fig` is your matplotlib figure object
     lines_labels = [ax.get_legend_handles_labels() for ax in fig.axes]
-    lines, labels = [sum(lol, []) for lol in zip(*lines_labels)] # ignore [var-annotated]
+    lines, labels = [sum(lol, []) for lol in zip(*lines_labels)]  # ignore [var-annotated]
 
     # Remove duplicates while preserving order
     unique_labels = []

@@ -3,7 +3,8 @@ from braindecode.augmentation import GaussianNoise, TimeReverse, SignFlip, FTSur
     ChannelsDropout, SmoothTimeMask, BandstopFilter, Transform
 
 
-def get_augmentations(aug_names: List[str], probability: float, random_state: Optional[int] = None) -> List[Transform]:
+def get_augmentations(aug_names: List[str], probability: float,
+                      random_state: Optional[int] = None, **kwargs) -> List[Transform]:
     """
     Constructs a list of augmentation objects based on the specified augmentation names. Each augmentation
     is initialized with a given probability and an optional random state for reproducibility. Supported augmentations
@@ -38,10 +39,11 @@ def get_augmentations(aug_names: List[str], probability: float, random_state: Op
     https://braindecode.org/0.6/api.html#augmentation
 
     """
+    print(kwargs)
     aug_list = []
     for name in aug_names:
         if name in ('gaussiannoise', 'GaussianNoise'):
-            aug_list.append(GaussianNoise(probability=probability, std=0.001, random_state=random_state))
+            aug_list.append(GaussianNoise(probability=probability, random_state=random_state, **kwargs.get(name)))
         elif name in ('timereverse', 'TimeReverse'):
             aug_list.append(TimeReverse(probability=probability, random_state=random_state))
         elif name in ('signflip', 'SignFlip'):
@@ -49,14 +51,14 @@ def get_augmentations(aug_names: List[str], probability: float, random_state: Op
         elif name in ('ftsurrogate', 'FTSurrogate'):
             aug_list.append(FTSurrogate(probability=probability, random_state=random_state))
         elif name in ('channelsshuffle', 'ChannelsShuffle'):
-            aug_list.append(ChannelsShuffle(probability=probability, p_shuffle=0.2, random_state=random_state))
+            aug_list.append(ChannelsShuffle(probability=probability, random_state=random_state, **kwargs.get(name)))
         elif name in ('channelsdropout', 'ChannelsDropout'):
-            aug_list.append(ChannelsDropout(probability=probability, p_drop=0.2, random_state=random_state))
+            aug_list.append(ChannelsDropout(probability=probability, random_state=random_state, **kwargs.get(name)))
         elif name in ('smoothtimemask', 'SmoothTimeMask'):
-            aug_list.append(SmoothTimeMask(probability=probability, mask_len_samples=100, random_state=random_state))
+            aug_list.append(SmoothTimeMask(probability=probability, random_state=random_state, **kwargs.get(name)))
         elif name in ('bandstopfilter', 'BandstopFilter'):
-            aug_list.append(BandstopFilter(probability=probability, bandwidth=10, sfreq=120, max_freq=40,
-                                           random_state=random_state))
+            aug_list.append(BandstopFilter(probability=probability, sfreq=200, max_freq=45,
+                                           random_state=random_state, **kwargs.get(name)))
         else:
             raise KeyError(f"Unrecognized augmentation technique: {name}")
     return aug_list

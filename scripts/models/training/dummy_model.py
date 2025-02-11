@@ -11,14 +11,11 @@ from torch.utils.data import DataLoader
 from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
 from eegDlUncertainty.data.data_generators.augmentations import get_augmentations
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
-from eegDlUncertainty.data.results.history import History, get_history_objects
-from eegDlUncertainty.data.results.utils_mlflow import add_config_information
-from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \
+from eegDlUncertainty.data.results.history import History
+from eegDlUncertainty.experiments.utils_exp import  create_run_folder, get_parameters_from_config, \
     prepare_experiment_environment, \
     setup_experiment_path
 from eegDlUncertainty.models.classifiers.dummy import DummyModel
-from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
-from sklearn.dummy import DummyClassifier
 
 
 def main():
@@ -70,11 +67,11 @@ def main():
     random.seed(random_state)
     numpy.random.seed(random_state)
     torch.manual_seed(random_state)
+    experiment_name = "DummyModel"
 
     experiment_path, folder_name = setup_experiment_path(save_path=save_path,
                                                          config_path=config_path,
-                                                         experiment=model_name)
-    experiment_name = "DummyModel"
+                                                         experiment=experiment_name)
     prepare_experiment_environment(experiment_name=experiment_name)
     #########################################################################################################
     # Dataset
@@ -96,6 +93,7 @@ def main():
     #########################################################################################################
     # Generators
     #########################################################################################################
+
     train_gen = CauDataGenerator(subjects=train_subjects, dataset=dataset, device=device, split="train",
                                  use_age=use_age)
     val_gen = CauDataGenerator(subjects=val_subjects, dataset=dataset, device=device, split="val", use_age=use_age)

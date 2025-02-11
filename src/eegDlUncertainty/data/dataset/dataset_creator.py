@@ -2,12 +2,10 @@ import multiprocessing
 import os
 import shutil
 import time
-from tabnanny import verbose
 
 import autoreject
 from typing import Any, Dict, Tuple, Union
 
-import matplotlib.pyplot as plt
 import mne
 import numpy as np
 import pandas as pd
@@ -528,6 +526,7 @@ def create_greek_dataset(config, conf_path):
     for sub in data_info.values():
         file_path = os.path.join(eeg_path, sub, "eeg", f"{sub}_task-eyesclosed_eeg.set")
         raw = mne.io.read_raw_eeglab(input_fname=file_path, verbose=False, preload=True)
+
         raw.pick(desired_channels, verbose=False)
 
         end_time = preprocess['start'] + preprocess['num_seconds_per_subject']
@@ -552,16 +551,16 @@ def create_greek_dataset(config, conf_path):
         raw.resample(preprocess['sfreq'], verbose=False)
 
         raw.set_eeg_reference('average', verbose=False)
-        
+
         if preprocess['autoreject']:
             raw.set_montage(mne.channels.make_standard_montage('standard_1020'))
             epochs = mne.make_fixed_length_epochs(raw.copy(), duration=preprocess['autoreject_epochs'],
                                                   preload=True, verbose=False)
-            
+
             if len(epochs) <= 2:
                 print(f"Skipping {sub} due to no epochs")
                 continue
-            
+
             ar = autoreject.AutoReject(random_state=11,
                                        n_jobs=1, verbose=False, cv=min(10, len(epochs)))
             ar.fit(epochs)

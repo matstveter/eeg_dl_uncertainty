@@ -1,34 +1,26 @@
-import random
-
-import matplotlib
-import numpy
-
-from eegDlUncertainty.experiments.dataset_shift_experiment import eval_dataset_shifts
-from eegDlUncertainty.experiments.ood_experiments import ood_exp
-from eegDlUncertainty.models.classifiers.ensemble import Ensemble
-
-matplotlib.use("TkAgg")
 import argparse
 import os
-from typing import List, Optional, Union
+
 import mlflow
 import torch
-from braindecode.augmentation import AugmentedDataLoader
 from torch.utils.data import DataLoader
 
 from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
 from eegDlUncertainty.data.data_generators.augmentations import get_augmentations
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
-from eegDlUncertainty.data.results.history import History, MCHistory, get_history_objects
+from eegDlUncertainty.data.results.history import History, get_history_objects
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information
+from eegDlUncertainty.experiments.dataset_shift_experiment import eval_dataset_shifts
+from eegDlUncertainty.experiments.ood_experiments import ood_exp
 from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \
     prepare_experiment_environment, \
     setup_experiment_path
+from eegDlUncertainty.models.classifiers.ensemble import Ensemble
 from eegDlUncertainty.models.classifiers.main_classifier import MCClassifier
 
 
 def main():
-    experiement = "MCD_ensemble_final"
+    experiment = "MCD_ensemble_final"
     #########################################################################################################
     # Get arguments and read config file
     #########################################################################################################
@@ -48,50 +40,53 @@ def main():
     # Init variables from config file
     #########################################################################################################
     param = parameters.copy()
-    use_test_set: bool = parameters.pop("use_test_set", False)
     save_path: str = parameters.pop("save_path")
-    run_name: str = args.run_name
-
-    # Data related variables
-    dataset_version: int = parameters.pop("dataset_version")
+    model_name: str = parameters.get("classifier_name")
     prediction: str = parameters.pop("prediction")
+    dataset_version: int = parameters.pop("dataset_version")
+    eeg_epochs = parameters.get('eeg_epochs')
+    overlapping_epochs: bool = parameters.pop("epoch_overlap", False)
+    num_seconds: int = parameters.pop("num_seconds")
     use_age: bool = parameters.pop("use_age")
     age_scaling: str = parameters.pop("age_scaling")
-    num_seconds: int = parameters.pop("num_seconds")
-    eeg_epochs: str = parameters.pop("eeg_epochs")
-    overlapping_epochs: bool = parameters.pop("epoch_overlap", False)
-
-    # Augmentation related information
-    augmentations: List[Union[str, None]] = parameters.pop("augmentations")
-    augmentation_prob: Optional[float] = parameters.pop("augmentation_prob", 0.2)
-
-    mc_dropout_enabled: bool = parameters.pop("mc_dropout_enabled")
-    mc_dropout_rate: float = parameters.pop("mc_dropout_rate")
-
-    # Model training
-    model_name: str = parameters.get("classifier_name")
-    train_epochs: int = parameters.pop("training_epochs")
-    batch_size: int = parameters.pop("batch_size")
     learning_rate: float = parameters.pop("learning_rate")
+    batch_size: int = parameters.pop("batch_size")
+    train_epochs: int = parameters.pop("training_epochs")
     earlystopping: int = parameters.pop("earlystopping")
-    
-    # General variables
-    model_p = {
-        'depth': parameters.pop("depth"),
-        'cnn_units': parameters.pop("cnn_units"),
-        'max_kernel_size': parameters.pop("max_kernel_size")
-    }
 
-    random_state: int = 42
+    #########################################################################################################
+    # Fixed parameters
+    #########################################################################################################
+    age_noise_prob = 0.75
+    age_noise_level = 0.05
+    augmentations = ['timereverse', 'smoothtimemask']
+    other_parameters = {'smoothtimemask': {'mask_len_samples': 20}}
+    augmentation_prob = 0.5
+
+    #########################################################################################################
+    # Normal parameters
+    #########################################################################################################
+    depth = parameters.get("depth")
+    cnn_units = parameters.get("cnn_units")
+    max_kernel_size = parameters.get("max_kernel_size")
+    use_dropout_fc = parameters.get("use_dropout_fc")
+    #########################################################################################################
+
+    #########################################################################################################
+    # MC Dropout Parameters
+    #########################################################################################################
+    mc_dropout_enabled = True
+    mc_dropout_rate = 0.3
+    dropout_rate_fc = 0.4
+    neurons_fc = 64
+    num_fc_layers = 1
+    use_batch_fc = False
+    #########################################################################################################
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    random.seed(random_state)
-    numpy.random.seed(random_state)
-    torch.manual_seed(random_state)
-
-    experiment_path, folder_name = setup_experiment_path(save_path=save_path,
-                                                         config_path=config_path,
-                                                         experiment=experiement)
-    experiment_name = f"{experiement}_experiments"
+    experiment_path, folder_name = setup_experiment_path(save_path=save_path, config_path=config_path,
+                                                         experiment=experiment)
+    experiment_name = f"{experiment}_experiments"
     prepare_experiment_environment(experiment_name=experiment_name)
     #########################################################################################################
     # Dataset
@@ -106,30 +101,30 @@ def main():
         val_subjects = val_subjects[0:25]
         test_subjects = test_subjects[0:20]
 
-    if dataset.num_classes == 1:
-        criterion = torch.nn.BCEWithLogitsLoss()
-    else:
-        criterion = torch.nn.CrossEntropyLoss()
     #########################################################################################################
-    # Generators
+    # Loss function
     #########################################################################################################
-    train_gen = CauDataGenerator(subjects=train_subjects, dataset=dataset, device=device, split="train",
-                                 use_age=use_age)
-    val_gen = CauDataGenerator(subjects=val_subjects, dataset=dataset, device=device, split="val", use_age=use_age)
-    test_gen = CauDataGenerator(subjects=test_subjects, dataset=dataset, device=device, split="test", use_age=use_age)
-
-    #########################################################################################################
-    # Loaders
+    weight_tensor = dataset.get_class_weights(subjects=train_subjects, normalize=True)
+    weight_tensor = weight_tensor.to(device)
+    criterion = torch.nn.CrossEntropyLoss(weight=weight_tensor)
     #########################################################################################################
 
+    #########################################################################################################
+    # Generators and Loaders
+    #########################################################################################################
     if augmentations:
         train_augmentations = get_augmentations(aug_names=augmentations, probability=augmentation_prob,
-                                                random_state=random_state)
-        # noinspection PyTypeChecker
-        train_loader = AugmentedDataLoader(dataset=train_gen, transforms=train_augmentations, device=device,
-                                           batch_size=batch_size, shuffle=True)
+                                                **other_parameters)
     else:
-        train_loader = DataLoader(train_gen, batch_size=batch_size, shuffle=True)
+        train_augmentations = []
+
+    train_gen = CauDataGenerator(subjects=train_subjects, dataset=dataset, device=device, split="train",
+                                 use_age=use_age, augmentations=train_augmentations,
+                                 age_noise_prob=age_noise_prob, age_noise_level=age_noise_level)
+    train_loader = DataLoader(train_gen, batch_size=batch_size, shuffle=True)
+
+    val_gen = CauDataGenerator(subjects=val_subjects, dataset=dataset, device=device, split="val", use_age=use_age)
+    test_gen = CauDataGenerator(subjects=test_subjects, dataset=dataset, device=device, split="test", use_age=use_age)
 
     val_loader = DataLoader(val_gen, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_gen, batch_size=batch_size, shuffle=False)
@@ -143,16 +138,24 @@ def main():
         num_runs = 1
 
         for run_id in range(num_runs):
-            mlflow.start_run(run_name=f"{experiement}_run_{str(run_id)}", nested=True)
+            mlflow.start_run(run_name=f"{experiment}_run_{str(run_id)}", nested=True)
             run_path = create_run_folder(path=experiment_path, index=str(run_id))
             hyperparameters = {"in_channels": dataset.num_channels,
                                "num_classes": dataset.num_classes,
                                "time_steps": dataset.eeg_len,
                                "save_path": run_path,
                                "learning_rate": learning_rate,
+                               "cnn_units": cnn_units,
+                               "depth": depth,
+                               "max_kernel_size": max_kernel_size,
+                               "num_fc_layers": num_fc_layers,
+                               "neurons_fc": neurons_fc,
+                               "use_batch_fc": use_batch_fc,
+                               "use_dropout_fc": use_dropout_fc,
+                               "dropout_rate_fc": dropout_rate_fc,
                                "mc_dropout_enabled": mc_dropout_enabled,
-                               "mc_dropout_rate": mc_dropout_rate}
-            hyperparameters.update(model_p)
+                               "mc_dropout_rate": mc_dropout_rate
+                               }
             param.update(hyperparameters)
             add_config_information(config=param, dataset="CAUEEG")
 
@@ -170,7 +173,7 @@ def main():
                 print(f"Cuda Out Of Memory -> Cleanup -> Error message: {e}")
                 break
             else:
-                
+
                 evaluation_history_val = History(num_classes=dataset.num_classes, set_name="test_val",
                                                  loader_lenght=len(val_loader), save_path=run_path)
                 classifier.test_model(test_loader=val_loader, device=device, test_hist=evaluation_history_val,

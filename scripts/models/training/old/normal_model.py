@@ -32,7 +32,7 @@ def main():
         args.config_path = "test_conf.json"
         print("WARNING!!!! No config argument added, using the first conf.json file, mostly used for pycharm!")
 
-    config_path = os.path.join(os.path.dirname(__file__), "config_files", args.config_path)
+    config_path = os.path.join(os.path.dirname(__file__), "../config_files", args.config_path)
     parameters = get_parameters_from_config(config_path=config_path)
 
     #########################################################################################################

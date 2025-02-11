@@ -182,7 +182,7 @@ def get_parameters_from_config(config_path):
         'neurons_fc': neurons_fc,
         'use_batch_fc': use_batch_fc,
         'use_dropout_fc': use_dropout_fc,
-        'dropout_rate_fc': dropout_rate_fc
+        'dropout_rate_fc': dropout_rate_fc,
     }
 
     possible_predictions = ('dementia', 'abnormal')

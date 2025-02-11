@@ -1,6 +1,7 @@
 from typing import Optional, Tuple
 
 import torch
+import random
 from torch.utils.data import Dataset
 
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
@@ -8,19 +9,18 @@ from eegDlUncertainty.data.dataset.OODDataset import BaseDataset
 
 
 class CauDataGenerator(Dataset):  # type: ignore[type-arg]
-    def __init__(self, subjects: Tuple[str, ...], split: str, dataset: CauEEGDataset, use_age: bool,
-                 device: Optional[torch.device] = None, add_noise: bool = False, noise_level: float = 0.1):
+    def __init__(self, subjects: Tuple[str, ...], split: str, dataset: CauEEGDataset, use_age: bool, augmentations=None,
+                 device: Optional[torch.device] = None, age_noise_prob=0.0, age_noise_level: float = 0.1):
         super().__init__()
         self._use_age = use_age
-        if split == "train":
-            self.ages = torch.tensor(dataset.load_ages(subjects=subjects, split=split,
-                                                       add_noise=add_noise, noise_level=noise_level),
-                                     dtype=torch.float32)
-        else:
-            self.ages = torch.tensor(dataset.load_ages(subjects=subjects, split=split), dtype=torch.float32)
+        self.augmentations = augmentations if augmentations is not None else []
+        self.age_noise_prob = age_noise_prob
+        self.age_noise_level = age_noise_level
 
+        self.ages = torch.tensor(dataset.load_ages(subjects=subjects, split=split), dtype=torch.float32)
         self._x = torch.tensor(dataset.load_eeg_data(subjects=subjects, split=split), dtype=torch.float32)
-        targets = torch.tensor(dataset.load_targets(subjects=subjects, split=split, get_stats=True), dtype=torch.float32)
+        targets = torch.tensor(dataset.load_targets(subjects=subjects, split=split, get_stats=True),
+                               dtype=torch.float32)
 
         if len(targets.shape) == 1:
             targets = targets.unsqueeze(1)
@@ -39,17 +39,48 @@ class CauDataGenerator(Dataset):  # type: ignore[type-arg]
     def y(self) -> torch.Tensor:
         return self._y
 
+    def apply_augmentations(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        for aug in self.augmentations:
+            x = aug.forward(x)
+        return x
+
+    def apply_age_noise(self, age_tensor: torch.Tensor) -> torch.Tensor:
+        local_random = random.Random()
+        ran = local_random.random()
+        if ran < self.age_noise_prob:
+            noise = torch.normal(mean=0, std=self.age_noise_level * torch.abs(age_tensor))
+            age_tensor += noise
+        return age_tensor
+
     def __len__(self) -> int:  # type: ignore[no-any-return]
         return self._x.size()[0]
 
-    def __getitem__(self, index):
+    # def __getitem__(self, index):
+    #     if self._use_age:
+    #         age_tensor = self.ages[index].clone().detach().view(1, -1)
+    #         age_tensor = age_tensor.expand(1, self._x[index].shape[1])
+    #         combined_data = torch.cat((self._x[index], age_tensor), dim=0)
+    #         return combined_data, self._y[index]
+    #     else:
+    #         return self._x[index], self._y[index]
+
+    def __getitem__(self, index) -> Tuple[torch.Tensor, torch.Tensor]:
+
+        if self.augmentations:
+            eeg_data = self.apply_augmentations(self._x[index])
+        else:
+            eeg_data = self._x[index]
+
         if self._use_age:
+            # Create and attach age tensor
             age_tensor = self.ages[index].clone().detach().view(1, -1)
-            age_tensor = age_tensor.expand(1, self._x[index].shape[1])
-            combined_data = torch.cat((self._x[index], age_tensor), dim=0)
+            if self.age_noise_prob > 0.0:
+                age_tensor = self.apply_age_noise(age_tensor)
+            age_tensor = age_tensor.expand(1, eeg_data.shape[1])
+            combined_data = torch.cat((eeg_data, age_tensor), dim=0)
             return combined_data, self._y[index]
         else:
-            return self._x[index], self._y[index]
+            return eeg_data, self._y[index]
 
 
 class OODDataGenerator(Dataset):  # type: ignore[type-arg]

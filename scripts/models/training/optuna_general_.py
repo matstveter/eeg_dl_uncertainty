@@ -1,14 +1,12 @@
 import argparse
 import os
+import pickle
 import random
-from typing import List
 
 import mlflow
 import numpy
-import numpy as np
 import optuna
 import torch
-from braindecode.augmentation import AugmentedDataLoader
 from torch.utils.data import DataLoader
 
 from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
@@ -20,28 +18,41 @@ from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_
     setup_experiment_path
 from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
 
+study_name = "hyper_search_test"
+optuna_dir = "/home/tvetern/PhD/dl_uncertainty/optuna_dir/"
+pickle_file_path = os.path.join(optuna_dir, f"{study_name}.pkl")
+save_frequency = 5
+
+
+def save_study(study, trial):
+    if trial.number % save_frequency == 0:
+        with open(pickle_file_path, "wb") as f:
+            pickle.dump(study, f)
+        print(f"\n\nStudy saved at trial number: {trial.number}\n\n")
+
 
 def objective(trial, fixed_params):
     print("Running experiment number: ", trial.number)
+    #########################################################################################################
     # Fixed parameters
-    dataset_version: int = fixed_params["dataset_version"]
-    prediction: str = fixed_params["prediction"]
-    use_age: bool = fixed_params["use_age"]
-    save_path: str = fixed_params["save_path"]
-    model_name: str = fixed_params["model_name"]
-    use_test_set: bool = fixed_params["use_test_set"]
-    train_epochs: int = fixed_params["train_epochs"]
-    batch_size: int = fixed_params["batch_size"]
-    learning_rate: float = fixed_params["learning_rate"]
-    earlystopping: int = fixed_params["earlystopping"]
-    config_path: str = fixed_params.get("config_path")
-    overlapping_epochs: bool = fixed_params.get("overlapping_epochs", False)
-    metric: str = fixed_params.get("metric")
+    #########################################################################################################
+    config_path = fixed_params.get("config_path")
+    save_path = fixed_params.get("save_path")
+    model_name = fixed_params.get("model_name")
+    metric = fixed_params.get("metric")
+    prediction = fixed_params.get("prediction")
+    dataset_version = fixed_params.get("dataset_version")
+    eeg_epochs = fixed_params.get("eeg_epochs")
+    overlapping_epochs = fixed_params.get("overlapping_epochs")
+    num_seconds = fixed_params.get("num_seconds")
+    use_age = fixed_params.get("use_age")
+    age_scaling = fixed_params.get("age_scaling")
+    learning_rate = fixed_params.get("learning_rate")
+    batch_size = fixed_params.get("batch_size")
     augmentations = fixed_params.get("augmentations")
     augmentation_prob = fixed_params.get("augmentation_prob")
-    eeg_epochs = fixed_params.get("eeg_epochs")
-    age_scaling = fixed_params.get("age_scaling")
-    num_seconds = fixed_params.get("num_seconds")
+    train_epochs = fixed_params.get("train_epochs")
+    earlystopping = fixed_params.get("earlystopping")
     depth = fixed_params.get("depth")
     cnn_units = fixed_params.get("cnn_units")
     max_kernel_size = fixed_params.get("max_kernel_size")
@@ -50,36 +61,47 @@ def objective(trial, fixed_params):
     use_batch_fc = fixed_params.get("use_batch_fc")
     use_dropout_fc = fixed_params.get("use_dropout_fc")
     dropout_rate_fc = fixed_params.get("dropout_rate_fc")
+    #########################################################################################################
 
+    #########################################################################################################
+    # Random states
+    #########################################################################################################
     # Define random state and device
     random_state: int = 42
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     random.seed(random_state)
     numpy.random.seed(random_state)
     torch.manual_seed(random_state)
+    torch.cuda.manual_seed(random_state)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    #########################################################################################################
 
+    #########################################################################################################
+    # Optuna
+    #########################################################################################################
+    age_noise_prob = round(trial.suggest_float("age_noise_prob", 0.0, 0.9, step=0.1), 1)
+    if age_noise_prob > 0:
+        age_noise_level = trial.suggest_categorical("age_noise_level", [0.001, 0.01, 0.05, 0.1, 0.25, 0.5])
+    else:
+        age_noise_level = 0.0
+
+    #########################################################################################################
+
+    #########################################################################################################
+    # MLFlow
+    #########################################################################################################
+    params = {
+        "age_noise_prob": age_noise_prob,
+        "age_noise_level": age_noise_level
+    }
+    print(params)
     # Start mlflow run and create a folder for the current run
     mlflow.start_run(run_name=f"run_{str(trial.number)}", nested=True)
     run_path = create_run_folder(path=save_path, index=str(trial.number))
-    
-    cnn_units = trial.suggest_int("cnn_units", 10, 80, step=10)
-    max_kernel_size = trial.suggest_int("max_kernel_size", 10, 90, step=10)
-    num_fc_layers = trial.suggest_int("num_fc_layers", 1, 5)
-    neurons_fc = trial.suggest_categorical("neurons_fc", [8, 16, 32, 64, 128, 256])
-    use_batch_fc = trial.suggest_categorical("use_batch_fc", [True, False])
-    use_dropout_fc = trial.suggest_categorical("use_dropout_fc", [True, False])
-
-    params = {
-        "cnn_units": cnn_units,
-        "max_kernel_size": max_kernel_size,
-        "num_fc_layers": num_fc_layers,
-        "neurons_fc": neurons_fc,
-        "use_batch_fc": use_batch_fc,
-        "use_dropout_fc": use_dropout_fc,
-        "dropout_rate_fc": dropout_rate_fc,
-    }
 
     mlflow.log_params(params)
+    #########################################################################################################
 
     #########################################################################################################
     # Dataset
@@ -92,32 +114,34 @@ def objective(trial, fixed_params):
         train_subjects = train_subjects[0:10]
         val_subjects = val_subjects[0:10]
 
-    if dataset.num_classes == 1:
-        criterion = torch.nn.BCEWithLogitsLoss()
-    else:
-        criterion = torch.nn.CrossEntropyLoss()
+    weight_tensor = dataset.get_class_weights(subjects=train_subjects, normalize=True)
+    weight_tensor = weight_tensor.to(device)
+    criterion = torch.nn.CrossEntropyLoss(weight=weight_tensor)
+    #########################################################################################################
 
     #########################################################################################################
     # Generators
     #########################################################################################################
+    if augmentations:
+        train_augmentations = get_augmentations(aug_names=augmentations, probability=augmentation_prob,
+                                                random_state=random_state)
+    else:
+        train_augmentations = []
+
     train_gen = CauDataGenerator(subjects=train_subjects, dataset=dataset, device=device, split="train",
-                                 use_age=use_age)
+                                 use_age=use_age, augmentations=train_augmentations, age_noise_prob=age_noise_prob,
+                                 age_noise_level=age_noise_level)
     val_gen = CauDataGenerator(subjects=val_subjects, dataset=dataset, device=device, split="val",
                                use_age=use_age)
     #########################################################################################################
     # Loaders
     #########################################################################################################
-    if augmentations:
-        train_augmentations = get_augmentations(aug_names=augmentations, probability=augmentation_prob,
-                                                random_state=random_state)
-        # noinspection PyTypeChecker
-        train_loader = AugmentedDataLoader(dataset=train_gen, transforms=train_augmentations, device=device,
-                                           batch_size=batch_size, shuffle=True)
-    else:
-        train_loader = DataLoader(train_gen, batch_size=batch_size, shuffle=True)
-
+    train_loader = DataLoader(train_gen, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_gen, batch_size=batch_size, shuffle=True)
 
+    #########################################################################################################
+    # Model hyperparameters
+    #########################################################################################################
     hyperparameters = {"in_channels": dataset.num_channels,
                        "num_classes": dataset.num_classes,
                        "time_steps": dataset.eeg_len,
@@ -132,7 +156,11 @@ def objective(trial, fixed_params):
                        "use_dropout_fc": use_dropout_fc,
                        "dropout_rate_fc": dropout_rate_fc,
                        }
+    #########################################################################################################
 
+    #########################################################################################################
+    # Training
+    #########################################################################################################
     classifier = MainClassifier(model_name=model_name, **hyperparameters)
     train_history, val_history = get_history_objects(train_loader=train_loader, val_loader=val_loader,
                                                      save_path=run_path, num_classes=dataset.num_classes)
@@ -145,13 +173,16 @@ def objective(trial, fixed_params):
         mlflow.log_param("Exception Message", str(e))
         cleanup_function(experiment_path=run_path)
         print(f"Cuda Out Of Memory -> Cleanup -> Error message: {e}")
-
-        if metric == "loss":
-            return np.inf
-        else:
-            # If the metric is not loss, we return 0, like for accuracy, auc
-            return 0
-
+        raise optuna.exceptions.TrialPruned()
+    except RuntimeError as e:
+        if "CUBLAS_STATUS_ALLOC_FAILED" in str(e):
+            # Handle CUBLAS_STATUS_ALLOC_FAILED specifically
+            torch.cuda.empty_cache()
+            mlflow.set_tag("Exception", "CUBLAS Alloc Failed")
+            mlflow.log_param("Exception Message", str(e))
+            cleanup_function(experiment_path=run_path)
+            print(f"CUBLAS Alloc Failed -> Cleanup -> Error message: {e}")
+        raise optuna.exceptions.TrialPruned()
     else:
         evaluation_history = History(num_classes=dataset.num_classes, set_name="test_val",
                                      loader_lenght=len(val_loader), save_path=run_path)
@@ -189,13 +220,28 @@ def main():
     parameters = get_parameters_from_config(config_path=config_path)
 
     #########################################################################################################
+    # Optuna specific variables
+    #########################################################################################################
+    if args.config_path == "test_conf.json":
+        experiment_name = "test"
+    else:
+        experiment_name = "optuna_age_noise"
+
+    global study_name
+    global pickle_file_path
+
+    study_name = f"{experiment_name}.db"
+    pickle_file_path = os.path.join(optuna_dir, f"{study_name}.pkl")
+    stud_path = os.path.join(optuna_dir, f"{study_name}")
+
+    #########################################################################################################
     # Init variables from config file
     #########################################################################################################
     use_test_set: bool = parameters.pop("use_test_set", False)
     save_path: str = parameters.pop("save_path")
     model_name: str = parameters.get("classifier_name")
 
-    metric: str = "loss"
+    metric: str = "mcc"
 
     if metric not in ("loss", "accuracy", "auc", "mcc"):
         raise ValueError("metric must be either 'loss', 'accuracy', 'auc', 'mcc'!")
@@ -207,7 +253,7 @@ def main():
 
     experiment_path, folder_name = setup_experiment_path(save_path=save_path,
                                                          config_path=config_path,
-                                                         experiment=model_name)
+                                                         experiment=experiment_name)
 
     fixed_params = {
         "config_path": config_path,
@@ -220,15 +266,15 @@ def main():
         "dataset_version": parameters.get("dataset_version"),
         "eeg_epochs": parameters.get("eeg_epochs"),
         "overlapping_epochs": parameters.get("overlapping_epochs"),
+        "num_seconds": parameters.get("num_seconds"),
         "use_age": parameters.get("use_age"),
         "age_scaling": parameters.get("age_scaling"),
-        "num_seconds": parameters.get("num_seconds"),
-        "train_epochs": parameters.get("training_epochs"),
-        "batch_size": parameters.get("batch_size"),
         "learning_rate": parameters.get("learning_rate"),
-        "earlystopping": parameters.get("earlystopping"),
+        "batch_size": parameters.get("batch_size"),
         "augmentations": parameters.get("augmentations"),
         "augmentation_prob": parameters.get("augmentation_prob"),
+        "train_epochs": parameters.get("training_epochs"),
+        "earlystopping": parameters.get("earlystopping"),
         "depth": parameters.get("depth"),
         "cnn_units": parameters.get("cnn_units"),
         "max_kernel_size": parameters.get("max_kernel_size"),
@@ -237,13 +283,37 @@ def main():
         "use_batch_fc": parameters.get("use_batch_fc"),
         "use_dropout_fc": parameters.get("use_dropout_fc"),
         "dropout_rate_fc": parameters.get("dropout_rate_fc"),
+        "optuna_experiment_name": parameters.get("optuna_experiment")
     }
-    experiment_name = "optuna_depth_ensemble"
+    #########################################################################################################
+    # Prepare the environment
+    #########################################################################################################
+    experiment_name = f"{experiment_name}_"
     prepare_experiment_environment(experiment_name=experiment_name)
+    number_of_trials = 50
+    #########################################################################################################
+    # Run the optimization
+    #########################################################################################################
     with mlflow.start_run(run_name=experiment_name):
-        study = optuna.create_study(study_name="hyper_search" , direction=fixed_params["direction"])
-        # Optimization
-        study.optimize(lambda trial: objective(trial, fixed_params), n_trials=15)
+        # Create a study if it does not exist
+        if os.path.exists(pickle_file_path):
+            with open(pickle_file_path, "rb") as f:
+                study = pickle.load(f)
+            print(f"Study loaded from {pickle_file_path}")
+        else:
+            study = optuna.create_study(study_name=experiment_name, storage=f"sqlite:///{stud_path}",
+                                        direction=fixed_params["direction"])
+
+        completed_trials = 0
+        while completed_trials < number_of_trials:
+            study.optimize(lambda trial: objective(trial, fixed_params),
+                           n_trials=1,
+                           callbacks=[save_study])
+            completed_trials = sum([t.state == optuna.trial.TrialState.COMPLETE for t in study.trials])
+
+        # Save the study
+        with open(pickle_file_path, "wb") as f:
+            pickle.dump(study, f)
 
         # Log the best parameters
         for k, v in study.best_params.items():

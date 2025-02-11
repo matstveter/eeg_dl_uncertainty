@@ -100,10 +100,20 @@ def brier_score(probs, targets):
 
 def get_uncertainty_metrics(probs, targets):
     print(probs.shape, targets.shape)
-    return {'brier': brier_score(probs=probs, targets=targets),
-            'nll': nll(probs=probs, targets=targets),
-            'ece': ece(probs=probs, targets=targets).numpy().item(),
-            'mce': mce(probs=probs, targets=targets).numpy().item()}
+    metrics = {'brier': brier_score(probs=probs, targets=targets),
+               'nll': nll(probs=probs, targets=targets),
+               'ece': ece(probs=probs, targets=targets).numpy().item(),
+               'mce': mce(probs=probs, targets=targets).numpy().item()}
+
+    # Compute additional statistical metrics
+    metrics.update({
+        'variance': np.var(probs, axis=1).mean(),  # Average variance per sample
+        'std_dev': np.std(probs, axis=1).mean(),  # Average standard deviation per sample
+        'entropy': (-probs * np.log(probs + 1e-12)).sum(axis=1).mean(),  # Mean entropy
+    })
+    print(metrics)
+
+    return metrics
 
 
 def compute_classwise_brier(mean_probs: np.ndarray, one_hot_target: np.ndarray, targets: np.ndarray):

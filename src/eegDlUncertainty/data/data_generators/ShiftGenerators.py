@@ -27,7 +27,7 @@ class EEGDatashiftGenerator(Dataset):
             raise ValueError("Shift intensity should be between 0.0 and 1.0.")
 
         self._shift_intensity = shift_intensity
-        self.ages = torch.tensor(dataset.load_ages(subjects=subjects), dtype=torch.float32)
+        self.ages = torch.tensor(dataset.load_ages(subjects=subjects, split="test"), dtype=torch.float32)
 
         inputs = dataset.load_eeg_data(subjects=subjects, split="test")
         targets = dataset.load_targets(subjects=subjects, split="test")

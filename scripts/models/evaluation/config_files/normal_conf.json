@@ -4,31 +4,28 @@
   "model": {
     "name": "InceptionNetwork",
     "epochs": 500, 
-    "earlystopping": 75
+    "earlystopping": 150, 
+    "depth": 6,
+    "cnn_units": 20,
+    "max_kernel_size": 60,
+    "num_fc_layers": 2,
+    "neurons_fc": 256,
+    "use_batch_fc": true,
+    "use_dropout_fc": true,
+    "dropout_rate_fc": 0.5
   },
   "hyperparameters": {
-    "learning_rate": 0.001,
+    "learning_rate": 0.0001,
     "batch_size": 64,
     "augmentations": []
   },
   "data": {
     "prediction": "dementia",
-    "overlap": false,
-    "version": 1,
-    "eeg_epochs": "spread", 
+    "version": 2,
+    "eeg_epochs": "all", 
     "overlapping_epochs": false,
     "use_age": true, 
-    "age_scaling": "min_max",
+    "age_scaling": "sklearn_scale",
     "num_seconds": 30
-  },
-  "mc_dropout": {
-  "enabled": true, 
-  "dropout_rate": 0.25
-  },
-  "snapshot": {
-    "epochs_per_cycle": 100,
-    "num_cycles": 5,
-    "start_lr": 0.05,
-    "use_best_model": true
   }
 }

@@ -39,7 +39,7 @@ class _InceptionModule(nn.Module):
         """
         super().__init__()
         # Store selected activation function
-        self._activation_function = _no_activation_function if activation is None else activation
+        self._activation_function = _no_activation_function if activation is None else getattr(F, activation)
 
         # -------------------------------
         # Define Conv layer maybe operating on

@@ -10,17 +10,14 @@ from eegDlUncertainty.data.data_generators.augmentations import get_augmentation
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
 from eegDlUncertainty.data.results.history import History, get_history_objects
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information
-from eegDlUncertainty.experiments.dataset_shift_experiment import eval_dataset_shifts
-from eegDlUncertainty.experiments.ood_experiments import ood_exp
 from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \
     prepare_experiment_environment, \
     setup_experiment_path
-from eegDlUncertainty.models.classifiers.ensemble import Ensemble
-from eegDlUncertainty.models.classifiers.main_classifier import SWAGClassifier
+from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
 
 
 def main():
-    experiment = "SWAG_ensemble_final"
+    experiment = "normal_model"
     #########################################################################################################
     # Get arguments and read config file
     #########################################################################################################
@@ -66,7 +63,7 @@ def main():
     #########################################################################################################
     # Normal parameters
     #########################################################################################################
-    depth: int = parameters.get("depth")
+    depth = parameters.get("depth")
     cnn_units = parameters.get("cnn_units")
     max_kernel_size = parameters.get("max_kernel_size")
     num_fc_layers = parameters.get("num_fc_layers")
@@ -74,14 +71,6 @@ def main():
     use_batch_fc = parameters.get("use_batch_fc")
     use_dropout_fc = parameters.get("use_dropout_fc")
     dropout_rate_fc = parameters.get("dropout_rate_fc")
-
-    #########################################################################################################
-    # SWAG parameters
-    #########################################################################################################
-    swag_freq = 10
-    swag_lr = 0.1
-    swag_num_models = 19
-    swag_start = 50
     #########################################################################################################
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -89,7 +78,6 @@ def main():
                                                          experiment=experiment)
     experiment_name = f"{experiment}_experiments"
     prepare_experiment_environment(experiment_name=experiment_name)
-
     #########################################################################################################
     # Dataset
     #########################################################################################################
@@ -109,11 +97,11 @@ def main():
     weight_tensor = dataset.get_class_weights(subjects=train_subjects, normalize=True)
     weight_tensor = weight_tensor.to(device)
     criterion = torch.nn.CrossEntropyLoss(weight=weight_tensor)
-
-    #########################################################################################################
-    # Generators and loaders
     #########################################################################################################
 
+    #########################################################################################################
+    # Generators and Loaders
+    #########################################################################################################
     if augmentations:
         train_augmentations = get_augmentations(aug_names=augmentations, probability=augmentation_prob,
                                                 **other_parameters)
@@ -123,110 +111,76 @@ def main():
     train_gen = CauDataGenerator(subjects=train_subjects, dataset=dataset, device=device, split="train",
                                  use_age=use_age, augmentations=train_augmentations,
                                  age_noise_prob=age_noise_prob, age_noise_level=age_noise_level)
+    train_loader = DataLoader(train_gen, batch_size=batch_size, shuffle=True)
+
     val_gen = CauDataGenerator(subjects=val_subjects, dataset=dataset, device=device, split="val", use_age=use_age)
     test_gen = CauDataGenerator(subjects=test_subjects, dataset=dataset, device=device, split="test", use_age=use_age)
 
-    train_loader = DataLoader(train_gen, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_gen, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_gen, batch_size=batch_size, shuffle=False)
+
+    run_id = 1
 
     #########################################################################################################
     # Run experiment
     #########################################################################################################
-
     with mlflow.start_run(run_name=folder_name):
         # Setup MLFLOW experiment
-        num_runs = 1
 
-        for run_id in range(num_runs):
-            # Setup MLFLOW run
-            mlflow.start_run(run_name=f"{experiment}_run_{str(run_id)}", nested=True)
-            # Create run folder
-            run_path = create_run_folder(path=experiment_path, index=str(run_id))
-            # Model specific hyperparameters
-            hyperparameters = {"in_channels": dataset.num_channels,
-                               "num_classes": dataset.num_classes,
-                               "time_steps": dataset.eeg_len,
-                               "save_path": run_path,
-                               "learning_rate": learning_rate,
-                               "cnn_units": cnn_units,
-                               "depth": depth,
-                               "max_kernel_size": max_kernel_size,
-                               "num_fc_layers": num_fc_layers,
-                               "neurons_fc": neurons_fc,
-                               "use_batch_fc": use_batch_fc,
-                               "use_dropout_fc": use_dropout_fc,
-                               "dropout_rate_fc": dropout_rate_fc,
-                               "swag_num_models": swag_num_models
-                               }
+        # Setting depth and cnn units to half of the standard to have simpler base models
+        mlflow.start_run(run_name=f"{experiment}_{str(run_id)}")
+        run_path = create_run_folder(path=experiment_path, index=str(run_id))
+        hyperparameters = {"in_channels": dataset.num_channels,
+                           "num_classes": dataset.num_classes,
+                           "time_steps": dataset.eeg_len,
+                           "save_path": run_path,
+                           "learning_rate": learning_rate,
+                           "cnn_units": cnn_units,
+                           "depth": depth,
+                           "max_kernel_size": max_kernel_size,
+                           "num_fc_layers": num_fc_layers,
+                           "neurons_fc": neurons_fc,
+                           "use_batch_fc": use_batch_fc,
+                           "use_dropout_fc": use_dropout_fc,
+                           "dropout_rate_fc": dropout_rate_fc,
+                           }
+        param.update(hyperparameters)
+        add_config_information(config=param, dataset="CAUEEG")
 
-            # Update the parameter dict with the hyperparameters
-            param.update(hyperparameters)
-            # Add the hyperparameters to the MLFLOW run
-            add_config_information(config=param, dataset="CAUEEG")
-            # Init model
-            classifier = SWAGClassifier(model_name=model_name, **hyperparameters)
-            # Init history objects
-            train_history, val_history = get_history_objects(train_loader=train_loader, val_loader=val_loader,
-                                                             save_path=save_path, num_classes=dataset.num_classes)
-            # Try to train the model, catch CUDA out of memory error, mostly used during hyperparameter search
-            try:
-                # Fit model
-                classifier.fit_model(train_loader=train_loader, training_epochs=train_epochs, device=device,
+        classifier = MainClassifier(model_name=model_name, **hyperparameters)
+        train_history, val_history = get_history_objects(train_loader=train_loader, val_loader=val_loader,
+                                                         save_path=save_path, num_classes=dataset.num_classes)
+        try:
+            _ = classifier.fit_model(train_loader=train_loader, training_epochs=train_epochs, device=device,
                                      loss_fn=criterion, earlystopping_patience=earlystopping,
-                                     val_loader=val_loader, train_hist=train_history, val_history=val_history,
-                                     swag_start=swag_start, swag_lr=swag_lr, swag_freq=swag_freq,
-                                     swag_num_models=swag_num_models)
-            except torch.cuda.OutOfMemoryError as e:
-                # If CUDA out of memory error, log the error message and cleanup the experiment
-                mlflow.set_tag("Exception", "CUDA Out of Memory Error")
-                mlflow.log_param("Exception Message", str(e))
-                # Function to delete the experiment folder
-                cleanup_function(experiment_path=experiment_path)
-                print(f"Cuda Out Of Memory -> Cleanup -> Error message: {e}")
-                break
-            else:
-                evaluation_history_val = History(num_classes=dataset.num_classes, set_name="test_val",
-                                                 loader_lenght=len(val_loader), save_path=run_path)
-                classifier.test_model(test_loader=val_loader, device=device, test_hist=evaluation_history_val,
-                                      loss_fn=criterion)
+                                     val_loader=val_loader, train_hist=train_history, val_history=val_history)
+        except torch.cuda.OutOfMemoryError as e:
+            mlflow.set_tag("Exception", "CUDA Out of Memory Error")
+            mlflow.log_param("Exception Message", str(e))
+            cleanup_function(experiment_path=experiment_path)
+            print(f"Cuda Out Of Memory -> Cleanup -> Error message: {e}")
+        else:
+            evaluation_history_val = History(num_classes=dataset.num_classes, set_name="test_val",
+                                             loader_lenght=len(val_loader), save_path=run_path)
+            classifier.test_model(test_loader=val_loader, device=device, test_hist=evaluation_history_val,
+                                  loss_fn=criterion)
 
-                evaluation_history_test = History(num_classes=dataset.num_classes, set_name="test",
-                                                  loader_lenght=len(test_loader), save_path=run_path)
-                classifier.test_model(test_loader=test_loader, device=device, test_hist=evaluation_history_test,
-                                      loss_fn=criterion)
+            evaluation_history_test = History(num_classes=dataset.num_classes, set_name="test",
+                                              loader_lenght=len(test_loader), save_path=run_path)
+            classifier.test_model(test_loader=test_loader, device=device, test_hist=evaluation_history_test,
+                                  loss_fn=criterion)
 
-                train_history.save_to_mlflow()
-                train_history.save_to_pickle()
-                val_history.save_to_mlflow()
-                val_history.save_to_pickle()
-                evaluation_history_val.save_to_mlflow()
-                evaluation_history_val.save_to_pickle()
-                evaluation_history_test.save_to_mlflow()
-                evaluation_history_test.save_to_pickle()
-            finally:
-                mlflow.end_run()
+            train_history.save_to_mlflow()
+            train_history.save_to_pickle()
+            val_history.save_to_mlflow()
+            val_history.save_to_pickle()
+            evaluation_history_val.save_to_mlflow()
+            evaluation_history_val.save_to_pickle()
+            evaluation_history_test.save_to_mlflow()
+            evaluation_history_test.save_to_pickle()
 
-            # Initialize ensemble model with the trained classifiers
-            ens = Ensemble(classifiers=classifier, device=device)
-            # Set the temperature scale for the ensemble
-            ens.set_temperature_scale_ensemble(data_loader=val_loader, device=device, criterion=criterion)
-            # Test the ensemble model on the validation and test set
-            ens.ensemble_performance_and_uncertainty(data_loader=val_loader, device=device, save_path=run_path,
-                                                     save_to_mlflow=True, save_to_pickle=True,
-                                                     save_name="ensemble_results_val")
-            ens.ensemble_performance_and_uncertainty(data_loader=test_loader, device=device, save_path=run_path,
-                                                     save_to_mlflow=True, save_to_pickle=True,
-                                                     save_name="ensemble_results_test")
-            # Evaluate the dataset shifts on the ensemble model using the test set
-            eval_dataset_shifts(ensemble_class=ens, test_subjects=test_subjects, dataset=dataset,
-                                device=device, use_age=use_age, batch_size=batch_size,
-                                save_path=run_path)
-            # Run the OOD experiment
-            ood_exp(ensemble_class=ens, dataset_version=dataset_version,
-                    num_seconds=num_seconds,
-                    age_scaling=age_scaling, device=device, batch_size=batch_size,
-                    save_path=experiment_path)
+        finally:
+            mlflow.end_run()
 
 
 if __name__ == "__main__":

@@ -1,16 +1,15 @@
 import abc
 import json
 import os.path
-from sys import modules
 from typing import Optional
 
 import mlflow
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
 from torch.nn.modules.loss import _Loss
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.utils.data import DataLoader
 
 from eegDlUncertainty.data.results.history import History
 from eegDlUncertainty.models.classifiers.inceptionTime import InceptionNetwork
@@ -135,28 +134,13 @@ class MainClassifier(abc.ABC, nn.Module):
         optimizer_name = kwargs.pop("optimizer_name", "adam")
 
         # Set default parameters and update from kwargs if available
-        if optimizer_name == "sgd":
+        if optimizer_name == "adam":
             lr = kwargs.pop("lr", self._learning_rate)
-            momentum = kwargs.pop("momentum", 0.9)
-            nesterov = kwargs.pop("nesterov", True)
-            optimizer = torch.optim.SGD(self.classifier.parameters(), lr=lr, momentum=momentum, nesterov=nesterov)
-
-        elif optimizer_name == "adam":
-            lr = kwargs.pop("lr", self._learning_rate)
-            betas = kwargs.pop("betas", (0.9, 0.999))
-            eps = kwargs.pop("eps", 1e-08)
-            weight_decay = kwargs.pop("weight_decay", 0)
+            betas = kwargs.pop("betas", (0.877, 0.988))
+            eps = kwargs.pop("eps", 2.475e-08)
+            weight_decay = kwargs.pop("weight_decay", 0.02)
             optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, betas=betas, eps=eps,
                                          weight_decay=weight_decay)
-
-        elif optimizer_name == "nadam":
-            lr = kwargs.pop("lr", self._learning_rate)
-            betas = kwargs.pop("betas", (0.9, 0.999))
-            eps = kwargs.pop("eps", 1e-08)
-            weight_decay = kwargs.pop("weight_decay", 0)
-            optimizer = torch.optim.NAdam(self.classifier.parameters(), lr=lr, betas=betas, eps=eps,
-                                          weight_decay=weight_decay)
-
         else:
             raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
@@ -236,7 +220,7 @@ class MainClassifier(abc.ABC, nn.Module):
 
                 y_pred = self.activation_function(outputs)
                 test_hist.batch_stats(y_pred=y_pred, y_true=target, loss=loss)
-            test_hist.on_epoch_end()
+            test_hist.on_epoch_end(plot=True)
 
     @staticmethod
     def activation_function(logits, ret_prob=True):
@@ -739,6 +723,7 @@ class DynamicEnsembleClassifier(MainClassifier):
                 no_improvement_epochs += 1
 
             if no_improvement_epochs >= patience:
+                print("No improvement, changing to high learning rate, ", num_high_lr_epochs)
                 # Save the best model path
                 if best_path is not None:
                     if best_path not in model_weight_paths:
@@ -746,9 +731,12 @@ class DynamicEnsembleClassifier(MainClassifier):
                         num_models += 1
                         # remove the best_path from potential_models
                         potential_models = [model for model in potential_models if model[0] != best_path]
+                else:
+                    print("No best path found!")
                 no_improvement_epochs = 0
                 best_loss = float('inf')
                 self.classifier = self.classifier.load(path=best_path)
+                self.classifier.to(device)
                 high_lr_epochs_remaining = num_high_lr_epochs
 
                 # Reset the optimizer to avoid carrying over old states

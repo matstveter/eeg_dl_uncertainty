@@ -321,7 +321,8 @@ class CauEEGDataset:
 
         return train_subjects, val_subjects, test_subjects
 
-    def load_targets(self, subjects: Tuple[str, ...], split, get_stats=False) -> numpy.ndarray:  # type: ignore[type-arg, return]
+    def load_targets(self, subjects: Tuple[str, ...], split,
+                     get_stats=False) -> numpy.ndarray:  # type: ignore[type-arg, return]
         """
         Load target class labels for a given set of subjects based on the current task.
 
@@ -545,7 +546,7 @@ class CauEEGDataset:
             structure = [60, 65, 70, ..., n_subjects], shape=(n_subjects, 1)
         """
         transformed_ages = self._ageScaler.transform(sub_ids=subjects, add_noise=add_noise, noise_level=noise_level)
-        
+
         if split == "test":
             num_epochs = 1
         elif split == "val":
@@ -661,3 +662,31 @@ class CauEEGDataset:
             for key, value in stats.items():
                 file.write(f"{split.upper()}\t --> {key}\t: {value}\n")
             file.write("\n")
+
+    def get_class_weights(self, subjects: str, normalize: bool = False) -> torch.Tensor:
+        """
+        Calculate class weights for a given dataset split.
+
+        This method calculates class weights for a given dataset split based on the class distribution
+        within the split. The class weights are computed as the inverse of the class proportions in the split
+        """
+        class_labels = np.array([self._merged_splits[sub]['class_label'] for sub in subjects])
+        class_weights = {}
+        total_samples = len(class_labels)
+
+        # Calculate the proportion of each class and then the inverse of that proportion as the class weight
+        for class_label, count in zip(*np.unique(class_labels, return_counts=True)):
+            proportion = count / total_samples
+            class_weights[class_label] = (1 / proportion)
+
+        if normalize:
+            # Normalize class weights to sum to 1
+            total_weight = sum(class_weights.values())
+            for class_label in class_weights:
+                class_weights[class_label] /= total_weight
+
+        # Convert the dictionary of class weights to a list ordered by class label and then to a torch.Tensor
+        sorted_weights = [class_weights[key] for key in sorted(class_weights.keys())]
+
+        # Return the class weights as a torch.Tensor
+        return torch.tensor(sorted_weights, dtype=torch.float)

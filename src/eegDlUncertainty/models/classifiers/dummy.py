@@ -58,7 +58,6 @@ class DummyModel:
                 outp = torch.round(outp)
         return outp
 
-
     def _get_majority_class(self, train_loader):
         class_counts = {}
         for _, tar in train_loader:
@@ -93,4 +92,4 @@ class DummyModel:
             test_hist.batch_stats(y_pred=y_pred, y_true=targets, loss=loss)
 
             # Finish epoch
-        test_hist.on_epoch_end()
+        test_hist.on_epoch_end(plot=True)

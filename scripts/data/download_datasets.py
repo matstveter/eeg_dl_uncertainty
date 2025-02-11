@@ -70,6 +70,13 @@ def download_greek_dataset(target_dir="/media/hdd/greek_eeg/"):
     openneuro.download(dataset="ds004504", target_dir=target_dir)
 
 
+def download_cog_dataset(target_dir="/media/hdd/res_cog/"):
+    if os.path.exists(target_dir):
+        raise ValueError("Folder exists")
+    openneuro.download(dataset="ds005385", target_dir=target_dir)
+
+
 if __name__ == "__main__":
     # download_greek_dataset()
-    mpi_lemon()
+    # mpi_lemon()
+    download_cog_dataset()
