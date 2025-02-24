@@ -114,15 +114,13 @@ def main():
     # Loaders
     #########################################################################################################
     train_loader_list = []
-    num_augmentations = ['timereverse', 'signflip', 'ftsurrogate', 'channelsshuffle',
-                         'channelsdropout', 'smoothtimemask', 'bandstopfilter']
+    num_augmentations = ['timereverse', 'signflip', 'ftsurrogate', 'channelsdropout', 'smoothtimemask']
 
     other_args = {'timereverse': {},
                   'signflip': {},
-                  'ftsurrogate': {'phase_noise_magnitude': 0.2, 'channel_indep': True},
-                  'channelsshuffle': {'p_shuffle': 0.1},
-                  'channelsdropout': {'p_drop': 0.4},
-
+                  'ftsurrogate': {'phase_noise_magnitude': 0.1, 'channel_indep': True},
+                  'channelsdropout': {'p_drop': 0.3},
+                  'smoothtimemask': {'max_len_samples': 15}
                   }
 
     for aug in num_augmentations:

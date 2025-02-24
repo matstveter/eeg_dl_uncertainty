@@ -5,6 +5,31 @@ import mne
 import json
 
 
+def create_ensemble_directory(run_path):
+    """
+    Create directories for ensemble models
+
+    Parameters
+    ----------
+    run_path: str
+        Path to the run directory
+
+    Returns
+    -------
+    run_path_5: str
+        Path to the ensemble_5 directory
+    run_path_20: str
+        Path to the ensemble_20 directory
+
+    """
+    run_path_5 = os.path.join(run_path, "ensemble_5")
+    os.makedirs(run_path_5, exist_ok=True)
+    run_path_20 = os.path.join(run_path, "ensemble_20")
+    os.makedirs(run_path_20, exist_ok=True)
+
+    return run_path_5, run_path_20
+
+
 def read_json_file(json_file_path: str) -> Union[Dict[str, Any], List[Any]]:
     """ Function that receives a json file and reads it and return
 

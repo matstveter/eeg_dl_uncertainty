@@ -9,19 +9,48 @@ from torch.utils.data import Dataset
 
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
 
+# todo For channel augmentation, use random channels, but reproducible?
+# todo For phase shift, baseline, scalar, gaussian, should we use the same amount of noise for all channels?
+# todo We want to use random values for channels and a fixed seed, that should be a boolean parameter
+# todo Interpolate, keep two channels always, Cz and one more
+# todo Phase shift using circular or hilbert?
+# todo Shift the alpha peak, using frequency shifts
+
 
 class EEGDatashiftGenerator(Dataset):
     def __init__(self, subjects: Tuple[str, ...], dataset: CauEEGDataset, use_age: bool, shift_intensity, shift_type,
-                 device: Optional[torch.device] = None, **kwargs):
+                 random_seed=None, device: Optional[torch.device] = None, **kwargs):
         super().__init__()
         self._use_age = use_age
         self._shift_type = shift_type
         self._eeg_info = dataset.eeg_info
         self._use_notch = False
 
-        self._scalar_multi = kwargs.pop("scalar_multi", 1.5)
-        self._phase_shift = kwargs.pop("phase_shift", np.pi / 4)
-        self._gaussian_std = kwargs.pop("gaussian_std", 0.1)
+        if self._shift_type == "baseline_drift":
+            if "max_drift_amplitude" not in kwargs:
+                raise ValueError("max_drift_amplitude must be provided for baseline drift augmentation")
+            if "num_sinusoids" not in kwargs:
+                raise ValueError("num_sinusoids must be provided for baseline drift augmentation")
+
+            self._max_drift_amplitude = kwargs.pop("max_drift_amplitude")
+            self._num_sinusoids = kwargs.pop("num_sinusoids")
+        elif self._shift_type in ("scalar_modulation_channel", "scalar_modulation"):
+            if "scalar_multi" not in kwargs:
+                raise ValueError("scalar_multi must be provided for scalar modulation augmentation")
+            self._scalar_multi = kwargs.pop("scalar_multi")
+        elif self._shift_type in ("phase_shift_channel", "phase_shift"):
+            if "phase_shift" not in kwargs:
+                raise ValueError("phase_shift must be provided for phase shift augmentation")
+            self._phase_shift = kwargs.pop("phase_shift")
+        elif self._shift_type in ("gaussian_channel", "gaussian"):
+            if "gaussian_std" not in kwargs:
+                raise ValueError("gaussian_std must be provided for gaussian noise augmentation")
+            self._gaussian_std = kwargs.pop("gaussian_std")
+
+        # Create a single RNG for the entire class
+        if random_seed is None:
+            # Otherwise, set a fixed seed for reproducibility
+            self.rng = np.random.default_rng(random_seed)
 
         if not 1.0 >= shift_intensity >= 0:
             raise ValueError("Shift intensity should be between 0.0 and 1.0.")
@@ -42,12 +71,10 @@ class EEGDatashiftGenerator(Dataset):
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device is None else device
 
     def apply_shift(self, data, targets):
-        if self._shift_type == "class_combination_temporal":
-            return self._combine_eeg(data=data, targets=targets, spatial=False)
-        elif self._shift_type in ("gaussian_channel", "phase_shift_channel", "scalar_modulation_channel",
-                                  "alpha_bandpass", "beta_bandpass",
-                                  "theta_bandpass", "delta_bandpass", "gamma_bandpass", "hbeta_bandpass",
-                                  "lbeta_bandpass"):
+        if self._shift_type in ("gaussian_channel", "phase_shift_channel", "scalar_modulation_channel",
+                                "alpha_bandpass", "beta_bandpass",
+                                "theta_bandpass", "delta_bandpass", "gamma_bandpass", "hbeta_bandpass",
+                                "lbeta_bandpass"):
             return self._channel_augmentations(data)
         elif self._shift_type == "interpolate":
             return self._interpolate_augment(data=data)
@@ -55,6 +82,10 @@ class EEGDatashiftGenerator(Dataset):
             return self._scalar_modulation(data=data)
         elif self._shift_type == "gaussian":
             return self._gaussian(data=data)
+        elif self._shift_type == "phase_shift":
+            return self._phase_shift_eeg(data=data, phi=self._phase_shift)
+        elif self._shift_type == "baseline_drift":
+            return self._add_baseline_drift(data)
         else:
             raise KeyError("Shift type not recognized")
 
@@ -235,15 +266,18 @@ class EEGDatashiftGenerator(Dataset):
                 # If the current channel is in the list of channels that should be reversed
                 if j in cur_channel_to_augment:
                     if self._shift_type == "gaussian_channel":
-                        noise = np.random.normal(0, self._gaussian_std, ch.shape)
+                        raise NotImplementedError("Check todos")
+                        noise = self.rng.normal(0, self._gaussian_std, ch.shape)
                         new_arr = ch + noise
                     elif self._shift_type == "phase_shift_channel":
+                        raise NotImplementedError("Check todos")
                         # Plot difference after shift
                         new_arr = self._phase_shift_eeg(data=ch, phi=self._phase_shift)
                     elif self._shift_type == "scalar_modulation_channel":
+                        raise NotImplementedError("Check todos")
                         new_arr = ch * self._scalar_multi
                     elif self._shift_type in ("theta_bandpass", "alpha_bandpass", "beta_bandpass", "delta_bandpass",
-                                              "hbeta_bandpass", "lbeta_bandpass", "gamma_bandpass"):
+                                              "gamma_bandpass"):
                         eeg_data = np.copy(ch)
                         h_freq, l_freq = self._get_freq()
                         # Ensure data is in 2D format
@@ -285,8 +319,10 @@ class EEGDatashiftGenerator(Dataset):
         altered_array : ndarray
             The augmented EEG data with bad channels interpolated.
         """
+        raise NotImplementedError("Check todos, remember to sample channels, keep Cz and one more")
         # Define the order of channels to augment, excluding the first channel
-        augment_order = [1, 3, 5, 7, 9, 11, 13, 15, 17, 2, 4, 6, 8, 10, 12, 14, 16, 18]
+        # channels_to_keep = [17, 18] Pz and Cz
+        augment_order = [1, 3, 5, 7, 9, 11, 13, 15, 0, 2, 4, 6, 8, 10, 12, 14, 16]
 
         # Determine the channels to augment based on the shift intensity
         cur_channel_to_augment = augment_order[0: int(self._shift_intensity * len(augment_order))]
@@ -349,7 +385,8 @@ class EEGDatashiftGenerator(Dataset):
         altered_array = np.zeros_like(data)
 
         for i, sub in enumerate(data):
-            noise = np.random.normal(0, self._shift_intensity, sub.shape)
+            # todo Is this correct???
+            noise = self.rng.normal(0, self._gaussian_std * self._shift_intensity, sub.shape)
             noisy_sub = sub + noise
             altered_array[i] = noisy_sub
 
@@ -394,7 +431,7 @@ class EEGDatashiftGenerator(Dataset):
         elif freq == "hbeta":
             return 20, 30
         elif freq == "gamma":
-            return 30, 50
+            return 30, 100
         else:
             raise ValueError(f"Frequency band: {freq} is not recognized")
 
@@ -470,6 +507,67 @@ class EEGDatashiftGenerator(Dataset):
         modified_data = np.real(np.abs(analytical_signal) * np.exp(1j * phase_data))
 
         return modified_data
+
+    @staticmethod
+    def circular_shift_eeg(data: np.ndarray, shift: int) -> np.ndarray:
+        """
+        Applies a circular shift to EEG data along the time axis.
+
+        Args:
+            data (np.ndarray): EEG data. Can be 2D (n_channels x n_times) or
+                               3D (n_samples x n_channels x n_times).
+            shift (int): Number of samples to shift.
+
+        Returns:
+            np.ndarray: Circularly shifted EEG data.
+        """
+        # If data is 2D, shift along axis=1 (time axis)
+        if data.ndim == 2:
+            return np.roll(data, shift, axis=1)
+        # If data is 3D, shift along axis=2 (time axis)
+        elif data.ndim == 3:
+            return np.roll(data, shift, axis=2)
+        else:
+            raise ValueError("Data must be 2D or 3D.")
+
+    def _add_baseline_drift(self, data: np.ndarray) -> np.ndarray:
+        """
+        Adds a combination of low-frequency sinusoids with random frequencies, phases,
+        and weights to simulate realistic baseline drifts. A fixed random seed ensures
+        reproducible results (useful for consistent model comparisons).
+
+        Returns:
+            np.ndarray: Copy of `data` with added baseline drifts (same shape).
+        """
+
+        data_drifted = data.copy()
+        n_samples, n_channels, n_times = data_drifted.shape
+
+        # Time axis over which we'll define our sinusoidal waves
+        time_axis = np.linspace(0, 2 * np.pi, n_times)
+
+        # Overall amplitude of the drift
+        drift_amplitude = self._max_drift_amplitude * self._shift_intensity
+
+        # Generate multiple sinusoids
+        sinusoids = []
+        for _ in range(self._num_sinusoids):
+            freq = self.rng.uniform(0.3, 1.0)  # random low frequency
+            phase = self.rng.uniform(0, 2 * np.pi)  # random starting phase
+            wave = np.sin(freq * time_axis + phase)
+            sinusoids.append(wave)
+
+        # Add drift to each channel
+        for i in range(n_samples):
+            for ch in range(n_channels):
+                combined = np.zeros_like(time_axis)
+                for wave in sinusoids:
+                    weight = self.rng.uniform(0.5, 1.0)
+                    combined += weight * wave
+
+                data_drifted[i, ch, :] += drift_amplitude * combined
+
+        return data_drifted
 
     @property
     def x(self) -> torch.Tensor:

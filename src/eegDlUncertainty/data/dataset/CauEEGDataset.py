@@ -66,6 +66,7 @@ class CauEEGDataset:
 
         if epochs == "all":
             self._epochs = int(maximum_epochs)
+            print(self._epochs)
         else:
             # In the case of spread or random the number of epochs is set to half of the maximum
             self._epochs = int(maximum_epochs / 2)

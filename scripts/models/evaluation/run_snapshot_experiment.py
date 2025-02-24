@@ -10,6 +10,7 @@ from eegDlUncertainty.data.data_generators.augmentations import get_augmentation
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
 from eegDlUncertainty.data.results.history import History, get_history_objects
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information
+from eegDlUncertainty.data.utils import create_ensemble_directory
 from eegDlUncertainty.experiments.dataset_shift_experiment import eval_dataset_shifts
 from eegDlUncertainty.experiments.ood_experiments import ood_exp
 from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \
@@ -35,7 +36,7 @@ def main():
 
     config_path = os.path.join(os.path.dirname(__file__), "config_files", args.config_path)
     parameters = get_parameters_from_config(config_path=config_path)
-    
+
     #########################################################################################################
     # Init variables from config file
     #########################################################################################################
@@ -112,7 +113,6 @@ def main():
     #########################################################################################################
     # Generators and loaders
     #########################################################################################################
-
     if augmentations:
         train_augmentations = get_augmentations(aug_names=augmentations, probability=augmentation_prob,
                                                 **other_parameters)
@@ -132,7 +132,6 @@ def main():
     #########################################################################################################
     # Run experiment
     #########################################################################################################
-
     with mlflow.start_run(run_name=folder_name):
         # Setup MLFLOW experiment
         num_runs = 1
@@ -210,26 +209,50 @@ def main():
             finally:
                 mlflow.end_run()
 
+            ensemble_5_path, ensemble_20_path = create_ensemble_directory(run_path=experiment_path)
+
+            #########################################################################################################
+            # Ensemble with only 5 classifiers
+            #########################################################################################################
+            ens_5 = Ensemble(classifiers=classifiers[0:5], device=device)
+            ens_5.set_temperature_scale_ensemble(data_loader=val_loader, device=device, criterion=criterion)
+            ens_5.ensemble_performance_and_uncertainty(data_loader=val_loader, device=device, save_path=ensemble_5_path,
+                                                       save_to_mlflow=True, save_to_pickle=True,
+                                                       save_name="ensemble_results_val")
+            ens_5.ensemble_performance_and_uncertainty(data_loader=test_loader, device=device,
+                                                       save_path=ensemble_5_path,
+                                                       save_to_mlflow=True, save_to_pickle=True,
+                                                       save_name="ensemble_results_test")
+            eval_dataset_shifts(ensemble_class=ens_5, test_subjects=test_subjects, dataset=dataset,
+                                device=device, use_age=use_age, batch_size=batch_size,
+                                save_path=ensemble_5_path)
+            ood_exp(ensemble_class=ens_5, dataset_version=dataset_version, num_seconds=num_seconds,
+                    age_scaling=age_scaling, device=device, batch_size=batch_size, save_path=ensemble_5_path)
+
+            #########################################################################################################
+            # Ensemble with 20 classifiers
+            #########################################################################################################
+
             # Initialize ensemble model with the trained classifiers
             ens = Ensemble(classifiers=classifiers, device=device)
             # Set the temperature scale for the ensemble
             ens.set_temperature_scale_ensemble(data_loader=val_loader, device=device, criterion=criterion)
             # Test the ensemble model on the validation and test set
-            ens.ensemble_performance_and_uncertainty(data_loader=val_loader, device=device, save_path=run_path,
+            ens.ensemble_performance_and_uncertainty(data_loader=val_loader, device=device, save_path=ensemble_20_path,
                                                      save_to_mlflow=True, save_to_pickle=True,
                                                      save_name="ensemble_results_val")
-            ens.ensemble_performance_and_uncertainty(data_loader=test_loader, device=device, save_path=run_path,
+            ens.ensemble_performance_and_uncertainty(data_loader=test_loader, device=device, save_path=ensemble_20_path,
                                                      save_to_mlflow=True, save_to_pickle=True,
                                                      save_name="ensemble_results_test")
             # Evaluate the dataset shifts on the ensemble model using the test set
             eval_dataset_shifts(ensemble_class=ens, test_subjects=test_subjects, dataset=dataset,
                                 device=device, use_age=use_age, batch_size=batch_size,
-                                save_path=run_path)
+                                save_path=ensemble_20_path)
             # Run the OOD experiment
             ood_exp(ensemble_class=ens, dataset_version=dataset_version,
                     num_seconds=num_seconds,
                     age_scaling=age_scaling, device=device, batch_size=batch_size,
-                    save_path=experiment_path)
+                    save_path=ensemble_20_path)
 
 
 if __name__ == "__main__":

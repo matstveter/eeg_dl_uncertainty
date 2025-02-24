@@ -10,6 +10,7 @@ from eegDlUncertainty.data.data_generators.augmentations import get_augmentation
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
 from eegDlUncertainty.data.results.history import History, get_history_objects
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information
+from eegDlUncertainty.data.utils import create_ensemble_directory
 from eegDlUncertainty.experiments.dataset_shift_experiment import eval_dataset_shifts
 from eegDlUncertainty.experiments.ood_experiments import ood_exp
 from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \

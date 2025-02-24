@@ -88,10 +88,10 @@ def main():
                'use_batch_fc': False, 'use_dropout_fc': True},
         '15': {'cnn_units': 6, 'dropout_rate_fc': 0.3, 'max_kernel_size': 50, 'neurons_fc': 16, 'num_fc_layers': 2,
                'use_batch_fc': True, 'use_dropout_fc': True},
-        '18': {'cnn_units': 8, 'dropout_rate_fc': 0.0, 'max_kernel_size': 15, 'neurons_fc': 32, 'num_fc_layers': 1,
-               'use_batch_fc': True, 'use_dropout_fc': False},
-        '21': {'cnn_units': 5, 'dropout_rate_fc': 0.4, 'max_kernel_size': 10, 'neurons_fc': 128, 'num_fc_layers': 1,
-               'use_batch_fc': False, 'use_dropout_fc': True}
+        # '18': {'cnn_units': 8, 'dropout_rate_fc': 0.0, 'max_kernel_size': 15, 'neurons_fc': 32, 'num_fc_layers': 1,
+        #        'use_batch_fc': True, 'use_dropout_fc': False},
+        # '21': {'cnn_units': 5, 'dropout_rate_fc': 0.4, 'max_kernel_size': 10, 'neurons_fc': 128, 'num_fc_layers': 1,
+        #        'use_batch_fc': False, 'use_dropout_fc': True}
     }
 
     #########################################################################################################
@@ -148,7 +148,7 @@ def main():
 
     with mlflow.start_run(run_name=folder_name):
         # Setup MLFLOW experiment
-        depths = [3, 6, 9, 12, 15, 18, 21]
+        depths = [3, 6, 9, 12, 15]
         classifiers = []
 
         for run_id, depth in enumerate(depths):

@@ -90,7 +90,7 @@ def main():
     #########################################################################################################
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    num_bagging_ensembles = 7
+    num_bagging_ensembles = 5
     experiment_path, folder_name = setup_experiment_path(save_path=save_path, config_path=config_path,
                                                          experiment=experiment)
     experiment_name = f"{experiment}_experiments"
