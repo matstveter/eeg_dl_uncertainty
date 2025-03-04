@@ -1,5 +1,6 @@
 import os.path
 import pickle
+from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
 # import matplotlib
@@ -37,6 +38,10 @@ class History:
         self._set_name: str = set_name
         self._loader_lenght: int = loader_lenght
         self._save_path = save_path
+
+        # Only for test set
+        self.subject_keys: List[str] = []
+        self.outputs = []
 
     def get_history_metric(self, metric_name: str) -> List[float]:
         """ Returns the values of a specific metric
@@ -108,31 +113,35 @@ class History:
             data type errors or device mismatches.
         """
         self._loss.append(self.epoch_loss / self._loader_lenght)
-        y_pred = torch.tensor(self.epoch_y_pred)
-        y_true = torch.tensor(self.epoch_y_true)
 
-        if self._num_classes == 1:
-            y_pred_proba = y_pred.detach().cpu().numpy()
-            y_pred = torch.round(y_pred)
-            y_pred = y_pred.detach().cpu().numpy()
-            y_true = y_true.detach().cpu().numpy()
-            self._precision.append(precision_score(y_true=y_true, y_pred=y_pred, zero_division=0))
-            self._recall.append(recall_score(y_true=y_true, y_pred=y_pred))
-            self._f1.append(f1_score(y_true=y_true, y_pred=y_pred))
-            self._auc.append(roc_auc_score(y_true=y_true, y_score=y_pred_proba))
-        else:
-            y_pred_proba = y_pred.detach().cpu().numpy()
-            y_true_one_hot = y_true.detach().cpu().numpy()
-            _, y_pred = torch.max(y_pred, dim=1)
-            _, y_true = torch.max(y_true, dim=1)
-            y_pred = y_pred.detach().cpu().numpy()
-            y_true = y_true.detach().cpu().numpy()
-            self._precision.append(precision_score(y_true=y_true, y_pred=y_pred, average="weighted",
-                                                   zero_division=0))
-            self._recall.append(recall_score(y_true=y_true, y_pred=y_pred, average="weighted"))
-            self._f1.append(f1_score(y_true=y_true, y_pred=y_pred, average="weighted"))
-            self._auc.append(
-                roc_auc_score(y_true=y_true_one_hot, y_score=y_pred_proba, multi_class="ovr", average="weighted"))
+        # Convert tensors
+        y_pred_tensor = torch.tensor(self.epoch_y_pred)
+        y_true_tensor = torch.tensor(self.epoch_y_true)
+
+        # Convert to NumPy arrays for probabilities
+        y_pred_proba = y_pred_tensor.detach().cpu().numpy()
+        y_true_one_hot = y_true_tensor.detach().cpu().numpy()
+
+        # Convert to class labels
+        y_pred = torch.argmax(y_pred_tensor, dim=1).detach().cpu().numpy()
+        y_true = torch.argmax(y_true_tensor, dim=1).detach().cpu().numpy()
+
+        # if self._num_classes == 1:
+        #     y_pred_proba = y_pred.detach().cpu().numpy()
+        #     y_pred = torch.round(y_pred)
+        #     y_pred = y_pred.detach().cpu().numpy()
+        #     y_true = y_true.detach().cpu().numpy()
+        #     self._precision.append(precision_score(y_true=y_true, y_pred=y_pred, zero_division=0))
+        #     self._recall.append(recall_score(y_true=y_true, y_pred=y_pred))
+        #     self._f1.append(f1_score(y_true=y_true, y_pred=y_pred))
+        #     self._auc.append(roc_auc_score(y_true=y_true, y_score=y_pred_proba))
+        # else:
+
+        self._precision.append(precision_score(y_true=y_true, y_pred=y_pred, average="weighted", zero_division=0))
+        self._recall.append(recall_score(y_true=y_true, y_pred=y_pred, average="weighted"))
+        self._f1.append(f1_score(y_true=y_true, y_pred=y_pred, average="weighted"))
+        self._auc.append(roc_auc_score(y_true=y_true_one_hot, y_score=y_pred_proba, multi_class="ovr",
+                                       average="weighted"))
 
         self._kappa.append(cohen_kappa_score(y1=y_true, y2=y_pred))
         self._mcc.append(matthews_corrcoef(y_true=y_true, y_pred=y_pred))
@@ -337,10 +346,6 @@ class History:
 
         Attributes
         ----------
-        _save_path : str
-            The base directory path where the data directory will be created and the pickle file saved.
-        _set_name : str
-            The base name used to construct the filename of the pickle file.
 
         Returns
         -------
@@ -478,12 +483,6 @@ class MCHistory:
 
         Attributes
         ----------
-        _labels : ndarray
-            A numpy array storing the true labels. If `_labels` is initially empty, it will be set during
-            the first pass and not modified thereafter.
-        _all_forward_predictions : list
-            A list that accumulates the predictions from each pass. Each element in the list is the `predictions`
-            array from a respective pass.
 
         Notes
         -----
@@ -588,10 +587,6 @@ class MCHistory:
 
         Attributes
         ----------
-        _variance : ndarray
-            Variance of predictions across different forward passes for each class.
-        _true_class_variance : ndarray
-            Variance of predictions for the actual classes of the samples.
 
         Notes
         -----
@@ -769,10 +764,6 @@ class MCHistory:
 
         Attributes
         ----------
-        _save_path : str
-            The base directory path where the data directory will be created and the pickle file saved.
-        _set_name : str
-            The base name used to construct the filename of the pickle file.
 
         Returns
         -------
@@ -895,6 +886,259 @@ class MCHistory:
 
 
 def get_history_objects(num_classes, train_loader, val_loader, save_path):
-    train_history = History(num_classes=num_classes, set_name="train", loader_lenght=len(train_loader), save_path=save_path)
+    train_history = History(num_classes=num_classes, set_name="train", loader_lenght=len(train_loader),
+                            save_path=save_path)
     val_history = History(num_classes=num_classes, set_name="val", loader_lenght=len(val_loader), save_path=save_path)
     return train_history, val_history
+
+
+class TestHistory:
+    def __init__(self, loader_lenght, save_path):
+        self._save_path = save_path
+        self._loader_lenght = loader_lenght
+
+        self._loss = []
+        self._accuracy = []
+        self._precision = []
+        self._recall = []
+        self._f1 = []
+        self._auc = []
+        self._kappa = []
+        self._mcc = []
+        self._conf_mat = []
+
+        self._set_name = "test"
+        self.epoch_y_true: List[torch.Tensor] = []
+        self.epoch_y_pred: List[torch.Tensor] = []
+        self.epoch_loss = 0
+        self.subject_keys = []
+
+    @staticmethod
+    def activation_function(logits, ret_prob=False):
+        """
+        Applies softmax activation function to the logits.
+
+        Args:
+            logits (torch.Tensor): The input logits tensor.
+            ret_prob (bool): If True, returns probabilities; otherwise, returns class indices.
+
+        Returns:
+            torch.Tensor: Probabilities or predicted class indices.
+        """
+        # Ensure logits is at least 2D
+        if logits.dim() == 1:
+            logits = logits.unsqueeze(0)  # Convert [C] to [1, C]
+
+        # Apply softmax
+        outp = torch.softmax(logits, dim=1)
+        if not ret_prob:
+            outp = torch.argmax(outp, dim=1)  # Get class indices
+        return outp
+
+    def batch_stats(self, y_pred, y_true, loss, subject_keys):
+        self.epoch_y_pred.extend(y_pred.tolist())  # Convert predicted probabilities to list
+        self.epoch_y_true.extend(y_true.tolist())  # Convert one-hot encoded
+        self.epoch_loss += loss.item()
+        self.subject_keys.extend(subject_keys)
+
+    def on_epoch_end(self, plot=False):
+        self._update_metrics()
+
+    @staticmethod
+    def majority_vote(majority_classes):
+        """
+        Determines the most frequently predicted class.
+
+        If there is a tie, returns the lowest class among the most frequent ones.
+
+        Args:
+            majority_classes (torch.Tensor): A tensor of predicted class labels.
+
+        Returns:
+            int: The most frequent class, or the lowest of the most frequent classes in case of a tie.
+        """
+        unique_classes, counts = torch.unique(majority_classes, return_counts=True)  # Count occurrences
+
+        max_count = counts.max()  # Find the highest occurrence count
+        most_frequent_classes = unique_classes[counts == max_count]  # Get classes with max count
+
+        return most_frequent_classes.min().item()  # Return the lowest class among the most frequent
+
+    @staticmethod
+    def _calculate_accuracy(y_pred, y_true) -> float:
+        """ Calculates the accuracy of the predictions
+
+        This functions sums up the equal predictions of y_pred and the true labels and then divide by the lenght
+        of y_true and lastly multiplies by 100 to make ti to percentage
+
+        Parameters
+        ----------
+        y_pred: np.ndarray
+            The predicted values from the model
+        y_true: np.ndarray
+            The true values or ground truths
+
+        Returns
+        -------
+        correct_percentage: float
+            Percentage of correctly classified points
+
+        """
+
+        # Ensure y_pred is a NumPy array
+        y_pred = np.asarray(y_pred)
+
+        # Ensure y_true is a NumPy array
+        y_true = np.asarray(y_true)
+
+        # Step 1: Fix Shape Issues in y_pred
+        if y_pred.ndim == 2 and y_pred.shape[1] == 1:
+            # Convert (batch, 1, num_classes) -> (batch, num_classes)
+            y_pred = np.squeeze(y_pred, axis=1)
+
+        # Ensure shapes match
+        if y_pred.shape != y_true.shape:
+            raise ValueError(f"Shape mismatch: y_pred has shape {y_pred.shape}, y_true has shape {y_true.shape}")
+
+        # Step 4
+        correct_percentage = ((y_pred == y_true).sum() / len(y_true)) * 100
+        return correct_percentage
+
+    def _update_metrics(self):
+        self._loss = self.epoch_loss / self._loader_lenght
+        # Convert tensors
+        y_pred_tensor = torch.tensor(self.epoch_y_pred).detach().cpu()
+        y_true_tensor = torch.tensor(self.epoch_y_true).detach().cpu()
+
+        subject_pred_dict = defaultdict(list)
+        subject_labels = {}
+
+        for sub_key, pred, label in zip(self.subject_keys, y_pred_tensor, y_true_tensor):
+            subject_pred_dict[sub_key].append(pred)
+            if sub_key not in subject_labels:
+                subject_labels[sub_key] = label
+
+        average_predicted_classes = []
+        average_predicted_probs = []
+
+        majority_vote_predicted_classes = []
+
+        first_epoch_predicted_classes = []
+        first_epoch_predicted_probs = []
+
+        label_list_class = []
+        label_list_one_hot = []
+
+        for key, preds in subject_pred_dict.items():
+            label_list_one_hot.append(subject_labels[key].numpy())
+            label_list_class.append(torch.argmax(subject_labels[key]).numpy())
+
+            preds_tensor = torch.stack(preds)
+
+            # Average of each of the subjects predictions
+            average_sub_pred = torch.mean(preds_tensor, dim=0)
+            average_predicted_classes.append(self.activation_function(average_sub_pred, ret_prob=False).numpy())
+            average_predicted_probs.append(self.activation_function(average_sub_pred, ret_prob=True).numpy())
+
+            # Majority vote
+            majority_classes = self.activation_function(preds_tensor, ret_prob=False)
+            majority_class = self.majority_vote(majority_classes)
+            majority_vote_predicted_classes.append(majority_class)
+
+            # First epoch
+            first_epoch_predicted_classes.append(self.activation_function(preds[0], ret_prob=False).numpy())
+            first_epoch_predicted_probs.append(self.activation_function(preds[0], ret_prob=True).numpy())
+
+        # Convert to numpy arrays
+        average_predicted_classes = np.array(average_predicted_classes)
+        average_predicted_probs = np.array(average_predicted_probs)
+        majority_vote_predicted_classes = np.array(majority_vote_predicted_classes)
+        first_epoch_predicted_classes = np.array(first_epoch_predicted_classes)
+        first_epoch_predicted_probs = np.array(first_epoch_predicted_probs)
+        label_list_class = np.array(label_list_class)
+        label_list_one_hot = np.array(label_list_one_hot)
+
+        predictions = {'average': average_predicted_classes, 'majority': majority_vote_predicted_classes,
+                       'first_epoch': first_epoch_predicted_classes, 'true': label_list_class,
+                       'true_one_hot': label_list_one_hot, 'average_probs': average_predicted_probs,
+                       'first_epoch_probs': first_epoch_predicted_probs, 'y_pred_tensor': y_pred_tensor,
+                       'y_true_tensor': y_true_tensor}
+
+        # Average performance
+        avg_performance = self.calculate_metrics(y_pred=average_predicted_classes,
+                                                 y_true=label_list_class, y_prob=average_predicted_probs,
+                                                 y_one_hot=label_list_one_hot)
+
+        # Majority vote performance
+        maj_performance = self.calculate_metrics(y_pred=majority_vote_predicted_classes, y_true=label_list_class)
+
+        # First epoch performance
+        first_epoch_performance = self.calculate_metrics(y_pred=first_epoch_predicted_classes,
+                                                         y_true=label_list_class, y_prob=first_epoch_predicted_probs,
+                                                         y_one_hot=label_list_one_hot)
+
+        data_dict = {'average': avg_performance, 'majority': maj_performance, 'first_epoch': first_epoch_performance,
+                     'loss': self._loss, 'predictions': predictions, 'subject_keys': self.subject_keys}
+        self.print_performance(data_dict)
+        self.save_to_pickle(data_dict)
+        self.plot_predictions(y_true=label_list_class, y_pred=average_predicted_classes, name="average")
+        self.plot_predictions(y_true=label_list_class, y_pred=majority_vote_predicted_classes, name="majority")
+        self.plot_predictions(y_true=label_list_class, y_pred=first_epoch_predicted_classes, name="first")
+
+    def calculate_metrics(self, y_pred, y_true, y_prob=None, y_one_hot=None):
+
+        performance_metrics = {}
+
+        precision = precision_score(y_true=y_true, y_pred=y_pred, average="weighted", zero_division=0)
+        recall = recall_score(y_true=y_true, y_pred=y_pred, average="weighted")
+        f1 = f1_score(y_true=y_true, y_pred=y_pred, average="weighted")
+        kappa = cohen_kappa_score(y1=y_true, y2=y_pred)
+        mcc = matthews_corrcoef(y_true=y_true, y_pred=y_pred)
+        conf_mat = confusion_matrix(y_true=y_true, y_pred=y_pred)
+        accuracy = self._calculate_accuracy(y_pred=y_pred, y_true=y_true)
+
+        performance_metrics["precision"] = precision
+        performance_metrics["recall"] = recall
+        performance_metrics["f1"] = f1
+        performance_metrics["kappa"] = kappa
+        performance_metrics["mcc"] = mcc
+        performance_metrics["conf_mat"] = conf_mat
+        performance_metrics["accuracy"] = accuracy
+
+        if y_prob is not None and y_one_hot is not None:
+            if y_prob.shape[1] == 1:
+                y_prob = np.squeeze(y_prob, axis=1)  # Converts (3, 1, 3) → (3, 3)
+            auc = roc_auc_score(y_true=y_one_hot, y_score=y_prob, multi_class="ovr", average="weighted")
+            performance_metrics["auc"] = auc
+
+        return performance_metrics
+
+    @staticmethod
+    def print_performance(data_dict):
+        for key, val in data_dict.items():
+            if key in ('average', 'majority', 'first_epoch'):
+                print(f"\n\nPerformance for {key.upper()}:")
+                for k, v in val.items():
+                    if k != "conf_mat":
+                        print(f"{k.upper()}: {v:.2f}")
+
+    def save_to_pickle(self, data_dict):
+        full_file_path = os.path.join(self._save_path, f"test_set_dict.pkl")
+        with open(full_file_path, 'wb') as file:
+            pickle.dump(data_dict, file)
+
+    def plot_predictions(self, y_true, y_pred, name=""):
+
+        # Generate the confusion matrix
+        cm = confusion_matrix(y_true, y_pred, labels=[0, 1, 2])
+
+        # Plot the confusion matrix as a heatmap
+        plt.figure(figsize=(8, 6))
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', cbar=False,
+                    xticklabels=['Healthy', 'MCI', 'Dementia'],
+                    yticklabels=['Healthy', 'MCI', 'Dementia'])
+
+        plt.xlabel("Predicted Class")
+        plt.ylabel("True Class")
+        plt.title("Confusion Matrix of Model Predictions")
+        plt.savefig(f"{self._save_path}/{name}_predictions.png")

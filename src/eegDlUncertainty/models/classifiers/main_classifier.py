@@ -1,6 +1,7 @@
 import abc
 import json
 import os.path
+from collections import defaultdict
 from typing import Optional
 
 import mlflow
@@ -11,7 +12,8 @@ from torch.nn.modules.loss import _Loss
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 
-from eegDlUncertainty.data.results.history import History
+from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
+from eegDlUncertainty.data.results.history import History, TestHistory
 from eegDlUncertainty.models.classifiers.inceptionTime import InceptionNetwork
 from eegDlUncertainty.models.classifiers.swag import SWAG, bn_update
 from eegDlUncertainty.models.get_models import get_models
@@ -208,19 +210,47 @@ class MainClassifier(abc.ABC, nn.Module):
             # Set the current model to the best model during training
             self.classifier = self.classifier.load(path=best_path)
 
-    def test_model(self, *, test_loader: DataLoader, device: torch.device, test_hist: History, loss_fn: _Loss):
+    def test_model(self, *, test_loader: DataLoader, device: torch.device,
+                   test_hist: History, loss_fn: _Loss):
         self.to(device)
+
+        if not isinstance(test_hist, TestHistory):
+            raise ValueError("test_hist should be an instance of TestHistory")
+
         with torch.no_grad():
             self.eval()
-            for inputs, targets in test_loader:
+            for inputs, targets, subject_indices in test_loader:
                 inputs, target = inputs.to(device), targets.to(device)
+
+                subject_keys = test_loader.dataset.get_subject_keys_from_indices(subject_indices)
 
                 outputs = self(inputs)
                 loss = loss_fn(outputs, target)
 
-                y_pred = self.activation_function(outputs)
-                test_hist.batch_stats(y_pred=y_pred, y_true=target, loss=loss)
+                test_hist.batch_stats(y_pred=outputs, y_true=target, loss=loss, subject_keys=subject_keys)
+
             test_hist.on_epoch_end(plot=True)
+
+
+
+
+
+        # with torch.no_grad():
+        #     self.eval()
+        #
+        #     for inputs, targets, subject_indices in test_loader:
+        #         inputs, target = inputs.to(device), targets.to(device)
+        #
+        #         subject_keys = test_loader.dataset.get_subject_keys_from_indices(subject_indices)
+        #
+        #         outputs = self(inputs)
+        #         loss = loss_fn(outputs, target)
+        #
+        #         y_pred = self.activation_function(outputs)
+        #
+        #         test_hist.batch_stats(y_pred=y_pred, y_true=target, loss=loss)
+        #
+        #     test_hist.on_epoch_end(plot=True)
 
     @staticmethod
     def activation_function(logits, ret_prob=True):

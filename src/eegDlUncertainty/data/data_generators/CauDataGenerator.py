@@ -1,3 +1,4 @@
+from os.path import split
 from typing import Optional, Tuple
 
 import torch
@@ -13,12 +14,15 @@ class CauDataGenerator(Dataset):  # type: ignore[type-arg]
                  device: Optional[torch.device] = None, age_noise_prob=0.0, age_noise_level: float = 0.1):
         super().__init__()
         self._use_age = use_age
+        self.split = split
         self.augmentations = augmentations if augmentations is not None else []
         self.age_noise_prob = age_noise_prob
         self.age_noise_level = age_noise_level
 
         self.ages = torch.tensor(dataset.load_ages(subjects=subjects, split=split), dtype=torch.float32)
-        self._x = torch.tensor(dataset.load_eeg_data(subjects=subjects, split=split), dtype=torch.float32)
+        x, self._subject_keys = dataset.load_eeg_data(subjects=subjects, split=split)
+        self._x = torch.tensor(x, dtype=torch.float32)
+
         targets = torch.tensor(dataset.load_targets(subjects=subjects, split=split, get_stats=True),
                                dtype=torch.float32)
 
@@ -66,7 +70,7 @@ class CauDataGenerator(Dataset):  # type: ignore[type-arg]
 
     def __getitem__(self, index) -> Tuple[torch.Tensor, torch.Tensor]:
 
-        if self.augmentations:
+        if self.augmentations and self.split == 'train':
             eeg_data = self.apply_augmentations(self._x[index])
         else:
             eeg_data = self._x[index]
@@ -74,13 +78,23 @@ class CauDataGenerator(Dataset):  # type: ignore[type-arg]
         if self._use_age:
             # Create and attach age tensor
             age_tensor = self.ages[index].clone().detach().view(1, -1)
-            if self.age_noise_prob > 0.0:
+            if self.age_noise_prob > 0.0 and self.split == 'train':
                 age_tensor = self.apply_age_noise(age_tensor)
             age_tensor = age_tensor.expand(1, eeg_data.shape[1])
             combined_data = torch.cat((eeg_data, age_tensor), dim=0)
-            return combined_data, self._y[index]
+
+            if self.split == 'test':
+                return combined_data, self._y[index], index
+            else:
+                return combined_data, self._y[index]
         else:
-            return eeg_data, self._y[index]
+            if self.split == 'test':
+                return eeg_data, self._y[index], index
+            else:
+                return eeg_data, self._y[index]
+
+    def get_subject_keys_from_indices(self, indices):
+        return [self._subject_keys[i] for i in indices]
 
 
 class OODDataGenerator(Dataset):  # type: ignore[type-arg]
@@ -88,7 +102,8 @@ class OODDataGenerator(Dataset):  # type: ignore[type-arg]
         super().__init__()
         self._use_age = use_age
         self.ages = torch.tensor(dataset.load_ages(), dtype=torch.float32)
-        self._x = torch.tensor(dataset.load_eeg_data(), dtype=torch.float32)
+        x, self._subject_keys = dataset.load_eeg_data()
+        self._x = torch.tensor(x, dtype=torch.float32)
         targets = torch.tensor(dataset.load_targets(), dtype=torch.float32)
 
         if len(targets.shape) == 1:
@@ -116,6 +131,9 @@ class OODDataGenerator(Dataset):  # type: ignore[type-arg]
             age_tensor = self.ages[index].clone().detach().view(1, -1)
             age_tensor = age_tensor.expand(1, self._x[index].shape[1])
             combined_data = torch.cat((self._x[index], age_tensor), dim=0)
-            return combined_data, self._y[index]
+            return combined_data, self._y[index], index
         else:
-            return self._x[index], self._y[index]
+            return self._x[index], self._y[index], index
+
+    def get_subject_keys_from_indices(self, indices):
+        return [self._subject_keys[i] for i in indices]

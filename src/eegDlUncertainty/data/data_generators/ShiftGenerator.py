@@ -32,7 +32,7 @@ class EEGDatashiftGenerator(Dataset):
 
         # Get data
         self.ages = torch.tensor(dataset.load_ages(subjects=subjects, split="test"), dtype=torch.float32)
-        inputs = dataset.load_eeg_data(subjects=subjects, split="test")
+        inputs, self._subject_keys = dataset.load_eeg_data(subjects=subjects, split="test")
         targets = dataset.load_targets(subjects=subjects, split="test")
 
         if shift_type == "phase_shift":
@@ -282,7 +282,7 @@ class EEGDatashiftGenerator(Dataset):
         if self._same_shift:
             shift_val = self._peak_shift
         else:
-            shift_val = self.rng.uniform(self._peak_shift, 2*self._peak_shift) * self.rng.choice([-1, 1])
+            shift_val = self.rng.uniform(self._peak_shift, 2 * self._peak_shift) * self.rng.choice([-1, 1])
 
         # Apply the frequency shift by modulating the analytic signal with a complex exponential.
         # This shifts every frequency component in the alpha band by shift_val.
@@ -701,6 +701,10 @@ class EEGDatashiftGenerator(Dataset):
             age_tensor = self.ages[index].clone().detach().view(1, -1)
             age_tensor = age_tensor.expand(1, self._x[index].shape[1])
             combined_data = torch.cat((self._x[index], age_tensor), dim=0)
-            return combined_data, self._y[index]
+
+            return combined_data, self._y[index], index
         else:
-            return self._x[index], self._y[index]
+            return self._x[index], self._y[index], index
+
+    def get_subject_keys_from_indices(self, indices):
+        return [self._subject_keys[i] for i in indices]

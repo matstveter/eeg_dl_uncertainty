@@ -276,3 +276,4 @@ def cleanup_function(experiment_path):
         print(f"Successfully deleted the folder: {experiment_path} due to OOMemory")
     except Exception as e:
         print(f"Error deleting the folder: {experiment_path}. Exception: {e}")
+

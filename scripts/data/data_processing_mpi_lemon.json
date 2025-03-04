@@ -1,8 +1,8 @@
 {
   "preprocessing": {
     "low_freq": 1.0,
-    "high_freq": 45,
-    "num_seconds_per_subject": 100,
+    "high_freq": 45.0,
+    "num_seconds_per_subject": 120,
     "sfreq": 200,
     "start": 30,
     "autoreject": true,

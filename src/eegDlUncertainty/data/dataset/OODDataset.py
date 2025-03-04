@@ -20,7 +20,9 @@ class BaseDataset(abc.ABC):
         self._dataset_version = dataset_version
         self._num_seconds_eeg = num_seconds_eeg
         self._age_scaling = age_scaling
-        self._num_epochs = 1
+
+        # Number of epochs per subject set similar as the original dataset
+        self._num_epochs = 4
 
         try:
             config = self._read_config(json_path=os.path.join(os.path.dirname(__file__),
@@ -62,6 +64,8 @@ class BaseDataset(abc.ABC):
 
     def load_eeg_data(self, plot=False):
 
+        subject_keys = []
+
         data = numpy.zeros(shape=(len(self.subjects) * self._num_epochs, self._num_channels, self._eeg_time_points))
         for i, sub in enumerate(self._subjects):
             sub_path = f"{self._dataset_path}/{sub}.npy"
@@ -79,14 +83,16 @@ class BaseDataset(abc.ABC):
             epochs = mne.make_fixed_length_epochs(raw=raw, duration=self._num_seconds_eeg,
                                                   preload=True, verbose=False)
             epoch_numpy_data = epochs.get_data(copy=False)
-            npy_data = epoch_numpy_data[0:self._num_epochs, :, :]
+            npy_data = epoch_numpy_data[:self._num_epochs, :, :]
+
+            subject_keys.extend([sub] * self._num_epochs)
 
             cur_index = 0
             for j in range((i * self._num_epochs), (i * self._num_epochs) + self._num_epochs):
                 data[j] = npy_data[cur_index]
                 cur_index += 1
 
-        return data
+        return data, subject_keys
 
     def load_targets(self):
         """ This function loads the target class from the label dictionary, and repeats the class labels num_epochs

@@ -5,7 +5,7 @@ import torch
 from torchmetrics.classification import MulticlassCalibrationError
 from sklearn.metrics import roc_auc_score, f1_score, precision_score, recall_score, confusion_matrix, accuracy_score
 
-from eegDlUncertainty.data.results.ece_variations import get_ace, get_ece, get_sce, get_tace
+from eegDlUncertainty.data.results.ece_variations import get_ace, get_sce, get_tace
 
 
 def ece(probs, targets, bins=10):
@@ -95,23 +95,18 @@ def brier_score(probs, targets):
     Returns
     -------
     """
+    assert probs.shape == targets.shape, f"Shapes of probs {probs.shape} and targets {targets.shape} do not match"
     return np.mean(np.sum((probs - targets) ** 2, axis=1))
 
 
 def get_uncertainty_metrics(probs, targets):
-    print(probs.shape, targets.shape)
     metrics = {'brier': brier_score(probs=probs, targets=targets),
                'nll': nll(probs=probs, targets=targets),
                'ece': ece(probs=probs, targets=targets).numpy().item(),
-               'mce': mce(probs=probs, targets=targets).numpy().item()}
-
-    # Compute additional statistical metrics
-    metrics.update({
-        'variance': np.var(probs, axis=1).mean(),  # Average variance per sample
-        'std_dev': np.std(probs, axis=1).mean(),  # Average standard deviation per sample
-        'entropy': (-probs * np.log(probs + 1e-12)).sum(axis=1).mean(),  # Mean entropy
-    })
-    print(metrics)
+               'mce': mce(probs=probs, targets=targets).numpy().item(),
+               'sce': get_sce(preds=probs, targets=targets),
+               'tace_0.05': get_tace(preds=probs, targets=targets, threshold=0.05),
+               'ace': get_ace(preds=probs, targets=targets)}
 
     return metrics
 
@@ -119,84 +114,85 @@ def get_uncertainty_metrics(probs, targets):
 def compute_classwise_brier(mean_probs: np.ndarray, one_hot_target: np.ndarray, targets: np.ndarray):
     """ Compute the Brier score for each class.
 
-    Parameters
-    ----------
-    mean_probs: np.ndarray
-        mean probabilities for each subject
-    one_hot_target: np.ndarray
-        one hot encoded targets
-    targets: np.ndarray
-        true class labels for each sample
+    Args:
+        mean_probs (np.ndarray): Shape (num_samples, num_classes), mean probabilities for each sample.
+        one_hot_target (np.ndarray): Shape (num_samples, num_classes), one-hot encoded true labels.
+        targets (np.ndarray): Shape (num_samples,), integer labels.
 
-    Returns
-    -------
-    dict
-        A dictionary where the keys are the class labels (0, 1, 2) and the values are the mean Brier score
-        for that class.
-
+    Returns:
+        dict: Mean Brier Score per class.
     """
-    brier = np.mean((mean_probs - one_hot_target) ** 2, axis=1)
+    # Compute Brier score for each sample
+    brier_per_sample = np.mean((mean_probs - one_hot_target) ** 2, axis=1)
 
-    class_wise_brier: Dict[int, List[float]] = {0: [], 1: [], 2: []}
+    # Organize Brier score per class
+    classwise_brier: Dict[int, List[float]] = {k: [] for k in np.unique(targets)}
     for i in range(len(targets)):
-        class_wise_brier[targets[i]].append(brier[i])
+        classwise_brier[targets[i]].append(brier_per_sample[i])
 
-    # Calculate the mean per class
-    return {k: np.mean(v) if len(v) > 0 else np.nan for k, v in class_wise_brier.items()}
-
-
-def compute_classwise_predictive_entropy(mean_probs, targets):
-    entropies = - np.sum(mean_probs * np.log(mean_probs + 1e-10), axis=1)
-    class_wise_PE: Dict[int, List[float]] = {0: [], 1: [], 2: []}
-    for i in range(len(targets)):
-        class_wise_PE[targets[i]].append(entropies[i])
-
-    # Calculate the mean per class
-    return {k: np.mean(v) if len(v) > 0 else np.nan for k, v in class_wise_PE.items()}
+    # Compute mean Brier score per class
+    return {k: np.mean(v) if len(v) > 0 else np.nan for k, v in classwise_brier.items()}
 
 
-def compute_classwise_variance(all_probs, targets):
+def compute_classwise_predictive_entropy(mean_probs: np.ndarray, targets: np.ndarray):
+    """Compute Predictive Entropy per class.
+
+    Args:
+        mean_probs (np.ndarray): Shape (num_samples, num_classes), mean probabilities for each sample.
+        targets (np.ndarray): Shape (num_samples,), integer labels.
+
+    Returns:
+        dict: Mean Predictive Entropy per class.
     """
-    Compute the variance of the probabilities for each class.
+    # Compute entropy per sample
+    entropies = -np.sum(mean_probs * np.log(mean_probs + 1e-10), axis=1)
 
-    This function calculates the variance of the predicted probabilities for each class.
-    The variance is calculated separately for each class, and the mean variance for each class is returned.
-
-    Parameters
-    ----------
-    all_probs : array_like
-        The predicted probabilities for each class. This should be a 2D array where the first dimension
-        corresponds to the samples and the second dimension corresponds to the classes.
-    targets : array_like
-        The true class labels for each sample. This should be a 1D array.
-
-    Returns
-    -------
-    dict
-        A dictionary where the keys are the class labels (0, 1, 2) and the values are the mean variance
-        of the predicted probabilities for that class.
-    """
-    variance = np.var(all_probs, axis=0)
-
-    class_wise_variance: Dict[int, List[float]] = {0: [], 1: [], 2: []}
+    # Organize entropy per class
+    classwise_entropy: Dict[int, List[float]] = {k: [] for k in np.unique(targets)}
     for i in range(len(targets)):
-        class_wise_variance[targets[i]].append(variance[i][targets[i]])
+        classwise_entropy[targets[i]].append(entropies[i])
 
-    # Calculate the mean per class
-    return {k: np.mean(v) if len(v) > 0 else np.nan for k, v in class_wise_variance.items()}
+    # Compute mean entropy per class
+    return {k: np.mean(v) if len(v) > 0 else np.nan for k, v in classwise_entropy.items()}
 
 
-def compute_classwise_uncertainty(all_probs, mean_probs, one_hot_target, targets):
+def compute_classwise_variance(mean_probs: np.ndarray, targets: np.ndarray):
+    """Compute Predictive Variance per class.
+
+    Args:
+        mean_probs (np.ndarray): Shape (num_samples, num_classes), mean probabilities for each sample.
+        targets (np.ndarray): Shape (num_samples,), integer labels.
+
+    Returns:
+        dict: Mean Predictive Variance per class.
+    """
+    # Compute variance per class (across samples, not ensembles)
+    variance_per_sample = np.var(mean_probs, axis=0)  # Shape: (num_classes,)
+
+    # Organize variance per class
+    classwise_variance: Dict[int, List[float]] = {k: [] for k in np.unique(targets)}
+    for i in range(len(targets)):
+        classwise_variance[targets[i]].append(variance_per_sample[targets[i]])
+
+    # Compute mean variance per class
+    return {k: np.mean(v) if len(v) > 0 else np.nan for k, v in classwise_variance.items()}
+
+
+def compute_classwise_uncertainty(mean_probs, one_hot_target, targets):
     return {"brier": compute_classwise_brier(mean_probs=mean_probs, one_hot_target=one_hot_target, targets=targets),
             "predictive_entropy": compute_classwise_predictive_entropy(mean_probs=mean_probs, targets=targets),
-            "variance": compute_classwise_variance(all_probs=all_probs, targets=targets)}
+            "variance": compute_classwise_variance(mean_probs=mean_probs, targets=targets)}
 
 
-def calculate_performance_metrics(y_pred_prob, y_pred_class, y_true_one_hot, y_true_class):
-    try:
-        auc = roc_auc_score(y_true=y_true_one_hot, y_score=y_pred_prob, multi_class="ovr", average="weighted")
-    except ValueError:
-        auc = 0
+def calculate_performance_metrics(y_pred_class, y_true_one_hot, y_true_class, y_pred_prob=None):
+
+    if y_pred_prob is not None:
+        try:
+            auc = roc_auc_score(y_true=y_true_one_hot, y_score=y_pred_prob, multi_class="ovr", average="weighted")
+        except ValueError:
+            auc = np.nan
+    else:
+        auc = np.nan
 
     return {'accuracy': accuracy_score(y_true=y_true_class, y_pred=y_pred_class),
             'precision': precision_score(y_true=y_true_class, y_pred=y_pred_class, average="weighted", zero_division=0),
@@ -204,10 +200,3 @@ def calculate_performance_metrics(y_pred_prob, y_pred_class, y_true_one_hot, y_t
             'f1': f1_score(y_true=y_true_class, y_pred=y_pred_class, average="weighted", zero_division=0),
             'auc': auc,
             'confusion_matrix': confusion_matrix(y_true=y_true_class, y_pred=y_pred_class)}
-
-
-def get_more_metrics(preds, targets):
-    print(get_ece(preds=preds, targets=targets))
-    print(get_sce(preds=preds, targets=targets))
-    print(get_tace(preds=preds, targets=targets, threshold=0.1))
-    print(get_ace(preds=preds, targets=targets))

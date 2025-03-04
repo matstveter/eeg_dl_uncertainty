@@ -2,9 +2,9 @@
   "preprocessing": {
     "low_freq": 1.0,
     "high_freq": 45,
-    "num_seconds_per_subject": 100,
+    "num_seconds_per_subject": 120,
     "sfreq": 200,
-    "start": 30,
+    "start": 0,
     "autoreject": true,
     "autoreject_epochs": 30,
     "use_notch": true

@@ -18,9 +18,10 @@ class_labels = {0: "Normal", 1: "MCI", 2: "Dementia"}
 
 
 def calculate_max_brier_score(num_classes):
-    max_prob = np.ones(num_classes) / num_classes
-    max_brier = np.sum((max_prob - np.eye(num_classes)) ** 2)
-    return max_brier
+    if num_classes == 1:
+        return 0.0
+    else:
+        return 2.0
 
 
 def create_scatter_plot(probs_pred, target_classes, dataset_name, save_path, jitter=0.15):
@@ -53,6 +54,7 @@ def create_scatter_plot(probs_pred, target_classes, dataset_name, save_path, jit
     whether the predictions are correct or incorrect.
     """
     try:
+        # Calculate the Brier score for each sample
         brier = np.mean((probs_pred - target_classes) ** 2, axis=1)
     except RuntimeWarning:
         print("runtime warning, ")
@@ -154,8 +156,10 @@ def single_dataset_experiment(ensemble_class, data_loader, device, dataset_name,
     results = ensemble_class.ensemble_performance_and_uncertainty(data_loader, device, save_path,
                                                                   save_name=f"OOD_{dataset_name}",
                                                                   save_to_pickle=True, save_to_mlflow=True)
-    predictions = results['predictions']
-    create_scatter_plot(probs_pred=predictions["probs"], target_classes=predictions["target_one_hot"],
+
+    predictions = results['average_epochs_merge_softmax']['predictions']
+    create_scatter_plot(probs_pred=predictions["final_subject_probabilities"], 
+                        target_classes=predictions["subject_one_hot_labels"],
                         dataset_name=dataset_name, save_path=save_path)
 
     print("Finished with dataset: ", dataset_name)
@@ -302,18 +306,25 @@ def ood_exp(ensemble_class, dataset_version: int, num_seconds: int, age_scaling:
 
     save_path = check_folder(path=save_path, path_ext="figures")
 
+    print("Running Militadous Experiment")
     greek_res, greek_pred = single_dataset_experiment(ensemble_class=ensemble_class,
                                                       data_loader=greek_loader, device=device,
                                                       dataset_name="Miltiadous", save_path=save_path)
+    print("Running MPI Experiment")
     mpi_res, mpi_pred = single_dataset_experiment(ensemble_class=ensemble_class, data_loader=mpi_loader, device=device,
                                                   dataset_name="MPI", save_path=save_path)
+    print("Running TDBrain Experiment")
     tdbrain_res, tdbrain_pred = single_dataset_experiment(ensemble_class=ensemble_class, data_loader=tdbrain_loader,
                                                           device=device,
                                                           dataset_name="TDBrain", save_path=save_path)
     combined_results = {'greek': greek_res, 'mpi': mpi_res, 'tdbrain': tdbrain_res}
 
-    preds_prob_list = [greek_pred["probs"], mpi_pred["probs"], tdbrain_pred["probs"]]
-    targets_list = [greek_pred["target_one_hot"], mpi_pred["target_one_hot"], tdbrain_pred["target_one_hot"]]
+    preds_prob_list = [greek_pred["final_subject_probabilities"], 
+                       mpi_pred["final_subject_probabilities"], 
+                       tdbrain_pred["final_subject_probabilities"]]
+    targets_list = [greek_pred["subject_one_hot_labels"], 
+                    mpi_pred["subject_one_hot_labels"], 
+                    tdbrain_pred["subject_one_hot_labels"]]
     all_dataset_scatter_plots(probs_pred_list=preds_prob_list, target_classes_list=targets_list,
                               dataset_names=["Miltiadous", "MPI", "TDBrain"], save_path=save_path)
 

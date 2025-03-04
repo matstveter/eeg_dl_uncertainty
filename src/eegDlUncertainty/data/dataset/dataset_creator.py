@@ -469,6 +469,8 @@ def create_tdbrain_dataset(config, conf_path):
         raw.filter(l_freq=preprocess['low_freq'], h_freq=preprocess['high_freq'], verbose=False)
         raw.resample(preprocess['sfreq'], verbose=False)
 
+        raw.plot(block=True)
+
         raw.set_eeg_reference('average', verbose=False)
 
         if preprocess['autoreject']:
@@ -491,7 +493,10 @@ def create_tdbrain_dataset(config, conf_path):
 
             # Check if the data is too short
             remaining_time = data.shape[1] / preprocess['sfreq']
-            if remaining_time < 30:
+
+            print(remaining_time)
+
+            if remaining_time < preprocess['num_seconds_per_subject']:
                 print(f"Data is too short, skipping {sub}")
                 continue
         else:
@@ -574,7 +579,7 @@ def create_greek_dataset(config, conf_path):
 
             # Check if the data is too short
             remaining_time = data.shape[1] / preprocess['sfreq']
-            if remaining_time < 30:
+            if remaining_time < preprocess['num_seconds_per_subject']:
                 print(f"Data is too short, skipping {sub}")
                 continue
         else:
@@ -663,7 +668,9 @@ def create_MPI_dataset(config, conf_path):
 
                 # Check if the data is too short
                 remaining_time = data.shape[1] / preprocess['sfreq']
-                if remaining_time < 30:
+                print(remaining_time)
+
+                if remaining_time < preprocess['num_seconds_per_subject']:
                     print(f"Data is too short, skipping {sub}")
                     continue
             else:
