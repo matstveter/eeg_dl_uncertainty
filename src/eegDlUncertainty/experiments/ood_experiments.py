@@ -6,7 +6,8 @@ from torch.utils.data import DataLoader
 
 from eegDlUncertainty.data.data_generators.CauDataGenerator import OODDataGenerator
 from eegDlUncertainty.data.dataset.OODDataset import GreekEEGDataset, MPILemonDataset, TDBrainDataset
-from eegDlUncertainty.data.utils import save_dict_to_pickle
+# from eegDlUncertainty.data.utils import save_dict_to_pickle
+from eegDlUncertainty.data.file_utils import save_dict_to_pickle
 from eegDlUncertainty.experiments.utils_exp import check_folder
 
 FIG_SIZE = (20, 12)
@@ -96,6 +97,7 @@ def create_scatter_plot(probs_pred, target_classes, dataset_name, save_path, jit
     plt.tight_layout()
 
     plt.savefig(f"{save_path}/{dataset_name}_OOD.eps", dpi=300, format="eps")
+    plt.close()
 
 
 def get_loaders(dataset, device, batch_size):
@@ -294,6 +296,7 @@ def all_dataset_scatter_plots(probs_pred_list, target_classes_list, dataset_name
     # plt.tight_layout() but not on the height
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     plt.savefig(f"{save_path}/OOD.eps", dpi=300, format="eps")
+    plt.close()
 
 
 def ood_exp(ensemble_class, dataset_version: int, num_seconds: int, age_scaling: str, device, batch_size: int,

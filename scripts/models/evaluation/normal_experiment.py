@@ -1,5 +1,7 @@
 import argparse
 import os
+import random
+import numpy as np
 
 import mlflow
 import torch
@@ -8,7 +10,7 @@ from torch.utils.data import DataLoader
 from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
 from eegDlUncertainty.data.data_generators.augmentations import get_augmentations
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
-from eegDlUncertainty.data.results.history import History, get_history_objects
+from eegDlUncertainty.data.results.history import TestHistory, get_history_objects
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information
 from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \
     prepare_experiment_environment, \
@@ -16,8 +18,18 @@ from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_
 from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
 
 
+def set_run_seed(seed):
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False  # Can be set to True for performance
+
+
 def main():
-    experiment = "normal_model"
+    experiment = "FINAL_NORMAL"
+    print(f"Running experiment: {experiment}")
     #########################################################################################################
     # Get arguments and read config file
     #########################################################################################################
@@ -28,6 +40,7 @@ def main():
     args = arg_parser.parse_args()
     if args.config_path is None:
         args.config_path = "test_conf.json"
+        experiment = "TEST"
         print("WARNING!!!! No config argument added, using the first conf.json file, mostly used for pycharm!")
 
     config_path = os.path.join(os.path.dirname(__file__), "config_files", args.config_path)
@@ -50,13 +63,14 @@ def main():
     batch_size: int = parameters.pop("batch_size")
     train_epochs: int = parameters.pop("training_epochs")
     earlystopping: int = parameters.pop("earlystopping")
+    base_seed = parameters.pop("base_seed")
 
     #########################################################################################################
     # Fixed parameters
     #########################################################################################################
-    age_noise_prob = 0.75
+    age_noise_prob = 0.5
     age_noise_level = 0.05
-    augmentations = ['timereverse', 'smoothtimemask']
+    augmentations = ['timereverse', 'smoothtimemask', 'signflip']
     other_parameters = {'smoothtimemask': {'mask_len_samples': 20}}
     augmentation_prob = 0.5
 
@@ -87,9 +101,10 @@ def main():
     train_subjects, val_subjects, test_subjects = dataset.get_splits()
 
     if "test" in config_path:
-        train_subjects = train_subjects[0:100]
-        val_subjects = val_subjects[0:25]
-        test_subjects = test_subjects[0:20]
+        train_subjects = train_subjects[0:30]
+        val_subjects = val_subjects[0:15]
+        test_subjects = val_subjects
+        train_epochs = 5
 
     #########################################################################################################
     # Loss function
@@ -121,14 +136,20 @@ def main():
 
     run_id = 1
 
+    # Check if mlflow is running
+    if mlflow.active_run() is not None:
+        # End the currently active run
+        mlflow.end_run()
+
     #########################################################################################################
     # Run experiment
     #########################################################################################################
     with mlflow.start_run(run_name=folder_name):
-        # Setup MLFLOW experiment
 
+        # Setup MLFLOW experiment
+        set_run_seed(seed=base_seed)
         # Setting depth and cnn units to half of the standard to have simpler base models
-        mlflow.start_run(run_name=f"{experiment}_{str(run_id)}")
+        mlflow.start_run(run_name=f"{experiment}_{str(run_id)}", nested=True)
         run_path = create_run_folder(path=experiment_path, index=str(run_id))
         hyperparameters = {"in_channels": dataset.num_channels,
                            "num_classes": dataset.num_classes,
@@ -149,7 +170,7 @@ def main():
 
         classifier = MainClassifier(model_name=model_name, **hyperparameters)
         train_history, val_history = get_history_objects(train_loader=train_loader, val_loader=val_loader,
-                                                         save_path=save_path, num_classes=dataset.num_classes)
+                                                         save_path=run_path, num_classes=dataset.num_classes)
         try:
             _ = classifier.fit_model(train_loader=train_loader, training_epochs=train_epochs, device=device,
                                      loss_fn=criterion, earlystopping_patience=earlystopping,
@@ -160,24 +181,16 @@ def main():
             cleanup_function(experiment_path=experiment_path)
             print(f"Cuda Out Of Memory -> Cleanup -> Error message: {e}")
         else:
-            evaluation_history_val = History(num_classes=dataset.num_classes, set_name="test_val",
-                                             loader_lenght=len(val_loader), save_path=run_path)
-            classifier.test_model(test_loader=val_loader, device=device, test_hist=evaluation_history_val,
-                                  loss_fn=criterion)
-
-            evaluation_history_test = History(num_classes=dataset.num_classes, set_name="test",
-                                              loader_lenght=len(test_loader), save_path=run_path)
-            classifier.test_model(test_loader=test_loader, device=device, test_hist=evaluation_history_test,
+            test_hist = TestHistory(loader_lenght=len(test_loader), save_path=run_path)
+            classifier.test_model(test_loader=test_loader, device=device, test_hist=test_hist,
                                   loss_fn=criterion)
 
             train_history.save_to_mlflow()
             train_history.save_to_pickle()
             val_history.save_to_mlflow()
             val_history.save_to_pickle()
-            evaluation_history_val.save_to_mlflow()
-            evaluation_history_val.save_to_pickle()
-            evaluation_history_test.save_to_mlflow()
-            evaluation_history_test.save_to_pickle()
+            test_hist.save_to_mlflow(id=run_id)
+            # Test history automatically saved to pickle
 
         finally:
             mlflow.end_run()

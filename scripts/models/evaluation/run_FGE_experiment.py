@@ -1,28 +1,36 @@
 import argparse
 import os
+import random
 
 import mlflow
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
 from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
 from eegDlUncertainty.data.data_generators.augmentations import get_augmentations
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
-from eegDlUncertainty.data.results.history import History, get_history_objects
+from eegDlUncertainty.data.results.history import TestHistory, get_history_objects
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information
-from eegDlUncertainty.data.utils import create_ensemble_directory
-from eegDlUncertainty.experiments.dataset_shift_experiment import eval_dataset_shifts
-from eegDlUncertainty.experiments.ood_experiments import ood_exp
+from eegDlUncertainty.data.utils import create_ensemble_directory, run_ensemble_experiment
 from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \
     prepare_experiment_environment, \
     setup_experiment_path
-from eegDlUncertainty.models.classifiers.ensemble import Ensemble
 from eegDlUncertainty.models.classifiers.main_classifier import FGEClassifier
 
 
+def set_run_seed(seed):
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False  # Can be set to True for performance
+
+
 def main():
-    # experiment = "FGE_ensemble_final"
-    experiment = "testing"
+    experiment = "FINAL_FGE"
+    print(f"Running experiment: {experiment}")
     #########################################################################################################
     # Get arguments and read config file
     #########################################################################################################
@@ -55,16 +63,17 @@ def main():
     batch_size: int = parameters.pop("batch_size")
     train_epochs: int = parameters.pop("training_epochs")
     earlystopping: int = parameters.pop("earlystopping")
+    base_seed = parameters.pop("base_seed")
 
     #########################################################################################################
     # Fixed parameters
     #########################################################################################################
-    age_noise_prob = 0.75
+    age_noise_prob = 0.5
     age_noise_level = 0.05
-    augmentations = ['timereverse', 'smoothtimemask']
+    augmentations = ['timereverse', 'smoothtimemask', 'signflip']
     other_parameters = {'smoothtimemask': {'mask_len_samples': 20}}
     augmentation_prob = 0.5
-    
+
     #########################################################################################################
     # Normal parameters
     #########################################################################################################
@@ -82,11 +91,11 @@ def main():
     #########################################################################################################
     # FGE Parameters
     fge_start_epoch: int = 70
-    fge_num_models: int = 13
+    fge_num_models: int = 20
     fge_epochs_per_cycle: int = 25
     fge_cycle_start_lr: float = 0.01
     fge_cycle_end_lr: float = fge_cycle_start_lr / 10
-    
+
     #########################################################################################################
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -104,9 +113,13 @@ def main():
     train_subjects, val_subjects, test_subjects = dataset.get_splits()
 
     if "test" in config_path:
-        train_subjects = train_subjects[0:100]
-        val_subjects = val_subjects[0:25]
-        test_subjects = test_subjects[0:20]
+        train_subjects = train_subjects[0:30]
+        val_subjects = val_subjects[0:15]
+        test_subjects = val_subjects
+        train_epochs = 5
+        fge_start_epoch = 5
+        fge_num_models = 2
+        fge_epochs_per_cycle = 5
 
     #########################################################################################################
     # Loss function
@@ -144,6 +157,9 @@ def main():
         num_runs = 1
 
         for run_id in range(num_runs):
+
+            set_run_seed(seed=base_seed)
+
             mlflow.start_run(run_name=f"{experiment}_run_{str(run_id)}", nested=True)
             run_path = create_run_folder(path=experiment_path, index=str(run_id))
             hyperparameters = {"in_channels": dataset.num_channels,
@@ -165,7 +181,7 @@ def main():
 
             classifier = FGEClassifier(model_name=model_name, **hyperparameters)
             train_history, val_history = get_history_objects(train_loader=train_loader, val_loader=val_loader,
-                                                             save_path=save_path, num_classes=dataset.num_classes)
+                                                             save_path=run_path, num_classes=dataset.num_classes)
             try:
                 model_weight_list = classifier.fit_model(train_loader=train_loader, training_epochs=train_epochs,
                                                          device=device,
@@ -199,70 +215,46 @@ def main():
                 # For each classifier, test the model and save the history
                 for i, cl in enumerate(classifiers):
                     print(f"\nTesting classifier {i + 1} of {len(classifiers)}. ")
-                    evaluation_history_val = History(num_classes=dataset.num_classes, set_name=f"test_val_{i}",
-                                                     loader_lenght=len(val_loader), save_path=run_path)
-                    classifier.test_model(test_loader=val_loader, device=device, test_hist=evaluation_history_val,
-                                          loss_fn=criterion)
 
-                    evaluation_history_test = History(num_classes=dataset.num_classes, set_name=f"test_{i}",
-                                                      loader_lenght=len(test_loader), save_path=run_path)
-                    classifier.test_model(test_loader=test_loader, device=device, test_hist=evaluation_history_test,
+                    test_hist = TestHistory(loader_lenght=len(test_loader), save_path=run_path)
+                    classifier.test_model(test_loader=test_loader, device=device, test_hist=test_hist,
                                           loss_fn=criterion)
-
-                    evaluation_history_val.save_to_mlflow()
-                    evaluation_history_val.save_to_pickle()
-                    evaluation_history_test.save_to_mlflow()
-                    evaluation_history_test.save_to_pickle()
+                    test_hist.save_to_mlflow(id=i)
 
             finally:
                 mlflow.end_run()
-            
+
             ensemble_5_path, ensemble_20_path = create_ensemble_directory(run_path=experiment_path)
+            
+            run_ensemble_experiment(classifiers=classifiers[0:5],
+                                    device=device,
+                                    experiment_path=ensemble_5_path,
+                                    dataset=dataset,
+                                    dataset_version=dataset_version,
+                                    num_seconds=num_seconds,
+                                    age_scaling=age_scaling,
+                                    use_age=use_age,
+                                    batch_size=batch_size,
+                                    criterion=criterion,
+                                    test_subjects=test_subjects,
+                                    val_loader=val_loader,
+                                    test_loader=test_loader,
+                                    save_name="ensemble_test_results_5")
 
-            #########################################################################################################
-            # Ensemble with only 5 classifiers
-            #########################################################################################################
-            ens_5 = Ensemble(classifiers=classifiers[0:5], device=device)
-            ens_5.set_temperature_scale_ensemble(data_loader=val_loader, device=device, criterion=criterion)
-            ens_5.ensemble_performance_and_uncertainty(data_loader=val_loader, device=device, save_path=ensemble_5_path,
-                                                       save_to_mlflow=True, save_to_pickle=True,
-                                                       save_name="ensemble_results_val")
-            ens_5.ensemble_performance_and_uncertainty(data_loader=test_loader, device=device,
-                                                       save_path=ensemble_5_path,
-                                                       save_to_mlflow=True, save_to_pickle=True,
-                                                       save_name="ensemble_results_test")
-            eval_dataset_shifts(ensemble_class=ens_5, test_subjects=test_subjects, dataset=dataset,
-                                device=device, use_age=use_age, batch_size=batch_size,
-                                save_path=ensemble_5_path)
-            ood_exp(ensemble_class=ens_5, dataset_version=dataset_version, num_seconds=num_seconds,
-                    age_scaling=age_scaling, device=device, batch_size=batch_size, save_path=ensemble_5_path)
-
-            #########################################################################################################
-            # Ensemble with 20 classifiers
-            #########################################################################################################
-
-            # Initialize ensemble model with the trained classifiers
-            ens = Ensemble(classifiers=classifiers, device=device)
-            # Set the temperature scale for the ensemble
-            ens.set_temperature_scale_ensemble(data_loader=val_loader, device=device, criterion=criterion)
-            # Test the ensemble model on the validation and test set
-            ens.ensemble_performance_and_uncertainty(data_loader=val_loader, device=device, save_path=ensemble_20_path,
-                                                     save_to_mlflow=True, save_to_pickle=True,
-                                                     save_name="ensemble_results_val")
-            ens.ensemble_performance_and_uncertainty(data_loader=test_loader, device=device, save_path=ensemble_20_path,
-                                                     save_to_mlflow=True, save_to_pickle=True,
-                                                     save_name="ensemble_results_test")
-            # Evaluate the dataset shifts on the ensemble model using the test set
-            eval_dataset_shifts(ensemble_class=ens, test_subjects=test_subjects, dataset=dataset,
-                                device=device, use_age=use_age, batch_size=batch_size,
-                                save_path=ensemble_20_path)
-            # Run the OOD experiment
-            ood_exp(ensemble_class=ens, dataset_version=dataset_version,
-                    num_seconds=num_seconds,
-                    age_scaling=age_scaling, device=device, batch_size=batch_size,
-                    save_path=ensemble_20_path)
-
-
+            run_ensemble_experiment(classifiers=classifiers,
+                                    device=device,
+                                    experiment_path=ensemble_20_path,
+                                    dataset=dataset,
+                                    dataset_version=dataset_version,
+                                    num_seconds=num_seconds,
+                                    age_scaling=age_scaling,
+                                    use_age=use_age,
+                                    batch_size=batch_size,
+                                    criterion=criterion,
+                                    test_subjects=test_subjects,
+                                    val_loader=val_loader,
+                                    test_loader=test_loader,
+                                    save_name="ensemble_test_results_20")
 
 
 if __name__ == "__main__":

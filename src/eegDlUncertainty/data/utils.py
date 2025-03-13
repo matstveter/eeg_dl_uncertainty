@@ -4,6 +4,10 @@ from typing import Any, Dict, List, Union
 import mne
 import json
 
+from eegDlUncertainty.experiments.dataset_shift_experiment import eval_dataset_shifts
+from eegDlUncertainty.experiments.ood_experiments import ood_exp
+from eegDlUncertainty.models.classifiers.ensemble import Ensemble
+
 
 def create_ensemble_directory(run_path):
     """
@@ -116,16 +120,40 @@ def view_eeg_from_file_path(file_path: str):
     raw.plot(scalings='auto', block=True)
 
 
-def save_dict_to_pickle(data_dict, path, name):
-    full_path = os.path.join(path, f"{name}.pkl")
+# def save_dict_to_pickle(data_dict, path, name):
+#     full_path = os.path.join(path, f"{name}.pkl")
+#
+#     # Check if file exists, if so, try another name
+#     if os.path.exists(full_path):
+#         print("File already exists, trying another name.")
+#         i = 1
+#         while os.path.exists(full_path):
+#             full_path = os.path.join(path, f"{name}_{i}.pkl")
+#             i += 1
+#
+#     with open(full_path, 'wb') as file:
+#         pickle.dump(data_dict, file)
 
-    # Check if file exists, if so, try another name
-    if os.path.exists(full_path):
-        print("File already exists, trying another name.")
-        i = 1
-        while os.path.exists(full_path):
-            full_path = os.path.join(path, f"{name}_{i}.pkl")
-            i += 1
 
-    with open(full_path, 'wb') as file:
-        pickle.dump(data_dict, file)
+def run_ensemble_experiment(*, classifiers, device,
+                            experiment_path, dataset, dataset_version, num_seconds,
+                            age_scaling, use_age, batch_size, criterion,
+                            test_subjects, val_loader, test_loader, save_name="ensemble_test_results"):
+
+    # Initialize ensemble model with the trained classifiers
+    ens = Ensemble(classifiers=classifiers, device=device)
+    # Set the temperature scale for the ensemble
+    ens.set_temperature_scale_ensemble(data_loader=val_loader, device=device, criterion=criterion,
+                                       save_path=experiment_path)
+    ens.ensemble_performance_and_uncertainty(data_loader=test_loader, device=device, save_path=experiment_path,
+                                             save_to_mlflow=True, save_to_pickle=True,
+                                             save_name=save_name)
+    # Evaluate the dataset shifts on the ensemble model using the test set
+    eval_dataset_shifts(ensemble_class=ens, test_subjects=test_subjects, dataset=dataset,
+                        device=device, use_age=use_age, batch_size=batch_size,
+                        save_path=experiment_path)
+    # Run the OOD experiment
+    ood_exp(ensemble_class=ens, dataset_version=dataset_version,
+            num_seconds=num_seconds,
+            age_scaling=age_scaling, device=device, batch_size=batch_size,
+            save_path=experiment_path)

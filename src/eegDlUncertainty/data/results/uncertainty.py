@@ -191,12 +191,30 @@ def calculate_performance_metrics(y_pred_class, y_true_one_hot, y_true_class, y_
             auc = roc_auc_score(y_true=y_true_one_hot, y_score=y_pred_prob, multi_class="ovr", average="weighted")
         except ValueError:
             auc = np.nan
+        
+        try: 
+            auc_per_class = roc_auc_score(
+                y_true=y_true_one_hot,
+                y_score=y_pred_prob,
+                multi_class="ovr",
+                average=None
+            )
+            temp_dict = {}
+            for idx, auc_score in enumerate(auc_per_class):
+                temp_dict[f"auc_class_{idx}"] = auc_score
+        except ValueError:
+            temp_dict = {}
+            for idx in range(3):
+                temp_dict[f"auc_class_{idx}"] = np.nan
     else:
         auc = np.nan
+        temp_dict = {'auc_class_0': np.nan, 'auc_class_1': np.nan, 'auc_class_2': np.nan}
 
     return {'accuracy': accuracy_score(y_true=y_true_class, y_pred=y_pred_class),
             'precision': precision_score(y_true=y_true_class, y_pred=y_pred_class, average="weighted", zero_division=0),
             'recall': recall_score(y_true=y_true_class, y_pred=y_pred_class, average="weighted", zero_division=0),
             'f1': f1_score(y_true=y_true_class, y_pred=y_pred_class, average="weighted", zero_division=0),
             'auc': auc,
-            'confusion_matrix': confusion_matrix(y_true=y_true_class, y_pred=y_pred_class)}
+            'confusion_matrix': confusion_matrix(y_true=y_true_class, y_pred=y_pred_class),
+            **temp_dict
+            }

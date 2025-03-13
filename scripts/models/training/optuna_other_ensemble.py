@@ -250,7 +250,7 @@ def objective(trial, fixed_params):
                                                     **model_hyperparameters)
                     classifiers.append(classifier.to(device))
         ens = Ensemble(classifiers=classifiers, device=device)
-        ens.test_ensemble(data_loader=val_loader, device=device, loss_fn=criterion, test_history=evaluation_history)
+        # ens.test_ensemble(data_loader=val_loader, device=device, loss_fn=criterion, test_history=evaluation_history)
         optimizing_metric = evaluation_history.get_history_metric(metric_name=metric)[0]
         mlflow.log_metric(f"optimizing_metric_{metric}", optimizing_metric)
 

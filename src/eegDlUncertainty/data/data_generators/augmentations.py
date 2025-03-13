@@ -39,7 +39,6 @@ def get_augmentations(aug_names: List[str], probability: float,
     https://braindecode.org/0.6/api.html#augmentation
 
     """
-    print(kwargs)
     aug_list = []
     for name in aug_names:
         if name in ('gaussiannoise', 'GaussianNoise'):

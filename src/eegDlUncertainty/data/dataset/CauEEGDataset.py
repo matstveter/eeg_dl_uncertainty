@@ -66,7 +66,6 @@ class CauEEGDataset:
 
         if epochs == "all":
             self._epochs = int(maximum_epochs)
-            print(self._epochs)
         else:
             # In the case of spread or random the number of epochs is set to half of the maximum
             self._epochs = int(maximum_epochs / 2)
@@ -331,6 +330,7 @@ class CauEEGDataset:
 
         Parameters
         ----------
+        get_stats
         subjects : Tuple[str, ...]
             A tuple of subject identifiers for which to load the target labels.
         split : str, optional
@@ -359,19 +359,11 @@ class CauEEGDataset:
         This method relies on internal attributes such as `_task_name`, `_prediction_type`,
         and others to determine the appropriate processing of class labels for the subjects.
         """
-        # if split == "test":
-        #     class_labels = np.array([self._merged_splits[sub]['class_label'] for sub in subjects])
-        # elif split == "val":
-        #     class_labels = np.array([self._merged_splits[sub]['class_label'] for sub in subjects])
-        #     class_labels = np.repeat(class_labels, self._num_val_epochs)
-        # else:
-            # Repeat the classes num_epochs times....
-            # class_labels = np.array([self._merged_splits[sub]['class_label'] for sub in subjects])
-            # class_labels = np.repeat(class_labels, self._epochs)
         class_labels = np.array([self._merged_splits[sub]['class_label'] for sub in subjects])
         class_labels = np.repeat(class_labels, self._epochs)
 
         if self._task_name == 'CAUEEG-Abnormal benchmark':
+            raise NotImplementedError("This task is not yet implemented")
             if get_stats:
                 self.get_label_statistics(class_labels=class_labels, classes={"0": 'Normal', "1": 'Abnormal'},
                                           split=split)
@@ -436,23 +428,10 @@ class CauEEGDataset:
         >>> self.load_eeg_data(('subject1', 'subject2'), plot=True)
         # This will load the EEG data for 'subject1' and 'subject2', plot the raw data, and return the data array.
         """
-        # if split == "test":
-        #     num_epochs = 1
-        # elif split == "val":
-        #     num_epochs = self._num_val_epochs
-        # else:
-        #     num_epochs = self._epochs
 
         subject_keys = []
 
-        num_epochs = self._epochs
-
-        use_epochs = False
-        if num_epochs == 1 or num_epochs == 0:
-            data = numpy.zeros(shape=(len(subjects), self._num_channels, self._eeg_len))
-        else:
-            use_epochs = True
-            data = numpy.zeros(shape=(len(subjects) * num_epochs, self._num_channels, self._eeg_len))
+        data = numpy.zeros(shape=(len(subjects) * self._epochs, self._num_channels, self._eeg_len))
 
         # Progress bar
         pbar = tqdm(total=len(subjects), desc="Loading", unit="subjects", colour='green')
@@ -471,68 +450,39 @@ class CauEEGDataset:
                 raw = mne.io.RawArray(data=npy_data, info=self.get_eeg_info(), verbose=False)
                 raw.plot(block=True)
 
-            if use_epochs:
-                raw = mne.io.RawArray(data=npy_data, info=self.get_eeg_info(), verbose=False)
-                overlap = (self._eeg_len / 2) / raw.info['sfreq'] if self._overlapping_epochs else 0
+            raw = mne.io.RawArray(data=npy_data, info=self.get_eeg_info(), verbose=False)
+            overlap = (self._eeg_len / 2) / raw.info['sfreq'] if self._overlapping_epochs else 0
 
-                epochs = mne.make_fixed_length_epochs(raw=raw, duration=self._num_seconds, overlap=overlap,
-                                                      preload=True, verbose=False)
-                epoch_npy_data = epochs.get_data(copy=False)
+            epochs = mne.make_fixed_length_epochs(raw=raw, duration=self._num_seconds, overlap=overlap,
+                                                  preload=True, verbose=False)
+            epoch_npy_data = epochs.get_data(copy=False)
 
-                max_num_epochs, _, _ = epoch_npy_data.shape
-                if max_num_epochs < num_epochs:
-                    raise ValueError(f"Not enough epochs for subject: {sub}")
+            max_num_epochs, _, _ = epoch_npy_data.shape
+            if max_num_epochs < self._epochs:
+                raise ValueError(f"Not enough epochs for subject: {sub}")
 
-                npy_data = epoch_npy_data[:num_epochs, :, :]
-
-                # Add the subject key to the subject list so that we have a mapping between the subject and the epochs
-                subject_keys.extend([sub] * num_epochs)
-
-                # Select the first epochs for test and val
-                # if split == "test":
-                #     npy_data = epoch_npy_data[:num_epochs, :, :]
-                # elif split == "val":
-                #     max_num_epochs, _, _ = epoch_npy_data.shape
-                #     # Spread out the epochs maximally
-                #     indices = np.linspace(0, max_num_epochs - 1, num_epochs + 1)
-                #     indices = np.round(indices).astype(int)
-                #     indices = np.unique(indices)[:-1]
-                #     npy_data = epoch_npy_data[indices, :, :]
-                # else:
-                #     max_num_epochs, _, _ = epoch_npy_data.shape
-                #
-                #     if max_num_epochs < num_epochs:
-                #         raise ValueError(f"Not enough epochs for subject: {sub}")
-                #
-                #     if self._epoch_structure == "all":
-                #         if max_num_epochs > num_epochs:
-                #             npy_data = epoch_npy_data[:num_epochs, :, :]
-                #         else:
-                #             npy_data = epoch_npy_data
-                #     else:
-                #         if self._epoch_structure == "random":
-                #             indices = np.random.choice(max_num_epochs, size=num_epochs, replace=False)
-                #         else:
-                #             indices = np.linspace(0, max_num_epochs - 1, num_epochs)
-                #             indices = np.round(indices).astype(int)
-                #             indices = np.unique(indices)
-                #
-                #         npy_data = epoch_npy_data[indices, :, :]
-
-                cur_index = 0
-                for j in range((i * num_epochs), (i * num_epochs) + num_epochs):
-                    data[j] = npy_data[cur_index]
-                    cur_index += 1
-                pbar.update(1)
+            # If the number of available epochs is equal to the number of epochs we want, we can just use the data
+            if max_num_epochs == self._epochs:
+                npy_data = epoch_npy_data
             else:
-                if self._eeg_len > npy_data.shape[1]:
-                    raise ValueError("Specified EEG length is longer than the actual recording.")
+                # Spread out the epochs maximally
+                indices = np.linspace(0, max_num_epochs - 1, self._epochs + 1)
+                indices = np.round(indices).astype(int)
+                indices = np.unique(indices)[:-1]
 
-                npy_data = npy_data[:, 0: self._eeg_len]
+                if len(indices) != self._epochs:
+                    indices = np.linspace(0, max_num_epochs, num=self._epochs, endpoint=False, dtype=int)
 
-                # Add the data to the empty numpy array
-                data[i] = npy_data
-                pbar.update(1)
+                npy_data = epoch_npy_data[indices, :, :]
+
+            # Add the subject key to the subject list so that we have a mapping between the subject and the epochs
+            subject_keys.extend([sub] * self._epochs)
+
+            cur_index = 0
+            for j in range((i * self._epochs), (i * self._epochs) + self._epochs):
+                data[j] = npy_data[cur_index]
+                cur_index += 1
+            pbar.update(1)
 
         # Close the progress bare, this could probably be avoided with a with statement instead, but...
         pbar.close()
@@ -558,16 +508,7 @@ class CauEEGDataset:
             structure = [60, 65, 70, ..., n_subjects], shape=(n_subjects, 1)
         """
         transformed_ages = self._ageScaler.transform(sub_ids=subjects, add_noise=add_noise, noise_level=noise_level)
-
-        num_epochs = self._epochs
-
-        # if split == "test":
-        #     num_epochs = 1
-        # elif split == "val":
-        #     num_epochs = self._num_val_epochs
-        # else:
-        #     num_epochs = self._epochs
-        return np.repeat(transformed_ages, num_epochs)
+        return np.repeat(transformed_ages, self._epochs)
 
     @staticmethod
     def __normalize_data(x):

@@ -668,7 +668,6 @@ def create_MPI_dataset(config, conf_path):
 
                 # Check if the data is too short
                 remaining_time = data.shape[1] / preprocess['sfreq']
-                print(remaining_time)
 
                 if remaining_time < preprocess['num_seconds_per_subject']:
                     print(f"Data is too short, skipping {sub}")

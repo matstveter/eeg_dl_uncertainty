@@ -106,6 +106,7 @@ def get_parameters_from_config(config_path):
     augment_prob: float = config.get('hyperparameters', {}).get('augment_prob')
     training_epochs: int = config.get('model', {}).get('epochs')
     earlystopping: int = config.get('model', {}).get('earlystopping')
+    base_seed: int = config.get('model', {}).get('base_seed')
 
     mc_dropout_enabled: bool = config.get('mc_dropout', {}).get('enabled', False)
     mc_dropout_rate: float = config.get('mc_dropout', {}).get('dropout_rate')
@@ -183,6 +184,7 @@ def get_parameters_from_config(config_path):
         'use_batch_fc': use_batch_fc,
         'use_dropout_fc': use_dropout_fc,
         'dropout_rate_fc': dropout_rate_fc,
+        'base_seed': base_seed
     }
 
     possible_predictions = ('dementia', 'abnormal')

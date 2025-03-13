@@ -906,6 +906,7 @@ class TestHistory:
         self._kappa = []
         self._mcc = []
         self._conf_mat = []
+        self._final_dict = None
 
         self._set_name = "test"
         self.epoch_y_true: List[torch.Tensor] = []
@@ -1085,6 +1086,8 @@ class TestHistory:
         self.plot_predictions(y_true=label_list_class, y_pred=majority_vote_predicted_classes, name="majority")
         self.plot_predictions(y_true=label_list_class, y_pred=first_epoch_predicted_classes, name="first")
 
+        self._final_dict = data_dict
+
     def calculate_metrics(self, y_pred, y_true, y_prob=None, y_one_hot=None):
 
         performance_metrics = {}
@@ -1126,6 +1129,18 @@ class TestHistory:
         full_file_path = os.path.join(self._save_path, f"test_set_dict.pkl")
         with open(full_file_path, 'wb') as file:
             pickle.dump(data_dict, file)
+
+    def save_to_mlflow(self, id):
+        if self._final_dict is None:
+            raise ValueError("No data to save to mlflow, call on_batch_end to save and calculate metrics!")
+        else:
+            metrics = ['average', 'majority', 'first_epoch']
+            metric_name = ['precision', 'recall', 'f1', 'kappa', 'mcc', 'accuracy', 'auc']
+
+            for metric in metrics:
+                for key, value in self._final_dict[metric].items():
+                    if key in metric_name:
+                        mlflow.log_metric(f"{id}_{metric}_{key}", value)
 
     def plot_predictions(self, y_true, y_pred, name=""):
 

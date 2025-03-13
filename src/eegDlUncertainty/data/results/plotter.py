@@ -153,11 +153,11 @@ def single_datashift_plotter(shift_result, shift_type, save_path):
         None
     """
     dataset_shifts = [shift for shift in shift_result]
-    accuracy = [shift_result[shift]['performance']['accuracy'] for shift in dataset_shifts]
-    auc = [shift_result[shift]['performance']['auc'] for shift in dataset_shifts]
-    brier = [shift_result[shift]['uncertainty']['brier'] for shift in dataset_shifts]
-    ece = [shift_result[shift]['uncertainty']['ece'] for shift in dataset_shifts]
-    nll = [shift_result[shift]['uncertainty']['nll'] for shift in dataset_shifts]
+    accuracy = [shift_result[shift]['average_epochs_merge_softmax']['performance']['accuracy'] for shift in dataset_shifts]
+    auc = [shift_result[shift]['average_epochs_merge_softmax']['performance']['auc'] for shift in dataset_shifts]
+    brier = [shift_result[shift]['average_epochs_merge_softmax']['uncertainty']['brier'] for shift in dataset_shifts]
+    ece = [shift_result[shift]['average_epochs_merge_softmax']['uncertainty']['ece'] for shift in dataset_shifts]
+    nll = [shift_result[shift]['average_epochs_merge_softmax']['uncertainty']['nll'] for shift in dataset_shifts]
 
     # Setting the style
     sns.set(style="darkgrid")
@@ -175,6 +175,7 @@ def single_datashift_plotter(shift_result, shift_type, save_path):
                 file_name=f'{save_path}_ece.eps', color='purple')
     create_plot(x=dataset_shifts, y=nll, y_label='NLL', title=f'{shift_type}: Dataset Shift vs. NLL',
                 file_name=f'{save_path}_nll.eps', color='orange')
+    plt.close()
 
 
 def create_plot(x, y, y_label, title, file_name, color="darkgreen"):
@@ -205,7 +206,7 @@ def multiple_datashift_plotter(shift_result, save_path):
             else:
                 metric = "uncertainty"
             dataset_shifts = [shift for shift in shift_result[shift_type]]
-            y = [shift_result[shift_type][shift][metric][p] for shift in dataset_shifts]
+            y = [shift_result[shift_type][shift]['average_epochs_merge_softmax'][metric][p] for shift in dataset_shifts]
             sns.lineplot(x=dataset_shifts, y=y, marker='o', linestyle='-', label=shift_type)
         sns.despine()
         plt.title(f'{p.upper()}: Over Dataset Shifts', fontsize=TITLE_FONT, weight='bold')
@@ -266,3 +267,5 @@ def multiple_runs_plotter(ensemble_names, ensemble_results, save_path):
             plt.tight_layout()
             plt.savefig(f"{save_path}_{d_shift}_{p}.eps", format="eps", dpi=300)
             plt.close()
+
+    plt.close()

@@ -1,16 +1,12 @@
 from collections import defaultdict
-from pickletools import optimize
-from typing import List
 
 import mlflow
 import numpy as np
 import torch
 
-import torch.nn as nn
-
 from eegDlUncertainty.data.results.uncertainty import calculate_performance_metrics, compute_classwise_uncertainty, \
     get_uncertainty_metrics
-from eegDlUncertainty.data.utils import save_dict_to_pickle
+from eegDlUncertainty.data.file_utils import save_dict_to_pickle
 
 
 class Ensemble(torch.nn.Module):
@@ -68,15 +64,13 @@ class Ensemble(torch.nn.Module):
     def predict_prob(self, x: torch.Tensor):
         return self.activation_function(logits=self.forward(x), ret_prob=True)
 
-    def set_temperature_scale_ensemble(self, data_loader, device, criterion, patience=250):
+    def set_temperature_scale_ensemble(self, data_loader, device, criterion, save_path):
         self.eval()
         self.to(device)
         # Setting this to 1.5 based on the original paper
         self.temperature.data.fill_(1.0)
         self.temperature = self.temperature.to(device)
         self.temperature.requires_grad = True  # Ensure it's a learnable parameter
-
-        nll_criterion = nn.CrossEntropyLoss().cuda()
 
         logits_list = []
         labels_list = []
@@ -93,19 +87,6 @@ class Ensemble(torch.nn.Module):
         logits = torch.cat(logits_list, dim=0)  # Shape: (N, num_classes)
         labels = torch.cat(labels_list, dim=0)  # Shape: (N,)
 
-        # 🔹 Print shapes to debug
-        print(f"Final logits shape: {logits.shape}")  # Expected (N, 3)
-        print(f"Final labels shape: {labels.shape}")  # Expected (N,)
-
-        # 🔹 Ensure labels are integer class indices (not one-hot)
-        if labels.ndim > 1:
-            labels = labels.argmax(dim=1)  # Convert (N, 3) → (N,)
-
-        # 🔹 Ensure correct dtype for torchmetrics
-        labels = labels.to(torch.int64)
-
-        nll_criterion_before = nll_criterion(logits, labels).item()
-
         optimizer = torch.optim.LBFGS([self.temperature], lr=0.01, max_iter=250)
 
         def evaluation():
@@ -114,72 +95,65 @@ class Ensemble(torch.nn.Module):
             # loss = criterion(logits / temp, labels)
             loss = criterion(logits / self.temperature, labels)
             loss.backward()
-            print(f"Loss: {loss.item()}")
             return loss
 
         optimizer.step(evaluation)
 
-        nll_criterion_after = nll_criterion(logits / self.temperature, labels).item()
-
-        print(f"Temperature: {self.temperature.item()}, "
-              f"NLL before: {nll_criterion_before}, "
-              f"NLL after: {nll_criterion_after}")
-
         print("Temperature: ", self.temperature.item())
         mlflow.log_metric("optimal_temp_ensemble", self.temperature.item())
 
-        from sklearn.calibration import calibration_curve
-        import matplotlib.pyplot as plt
-        from torchmetrics.classification import MulticlassCalibrationError
+        # from sklearn.calibration import calibration_curve
+        # import matplotlib.pyplot as plt
+        # from torchmetrics.classification import MulticlassCalibrationError
+        #
+        # ece_metric = MulticlassCalibrationError(num_classes=3, n_bins=10, norm='l1')
+        #
+        # probs_before = torch.nn.functional.softmax(logits, dim=1)
+        # probs_after = torch.nn.functional.softmax(logits / self.temperature, dim=1)
+        #
+        # ece_before = ece_metric(probs_before, labels).item()
+        # ece_after = ece_metric(probs_after, labels).item()
+        # print(f"ECE Before Scaling: {ece_before:.3f}, ECE After Scaling: {ece_after:.3f}")
+        #
+        # num_classes = 3  # Adjust for your dataset
+        #
+        # plt.figure(figsize=(6, 6))
+        # plt.plot([0, 1], [0, 1], "k--", label="Perfect Calibration")  # Diagonal reference line
+        #
+        # for class_idx in range(num_classes):
+        #     class_labels = (labels == class_idx).int()  # Convert to binary: 1 if label matches class, else 0
+        #
+        #     fraction_of_positives_before, mean_predicted_value_before = calibration_curve(
+        #         class_labels.cpu().numpy(), probs_before[:, class_idx].detach().cpu().numpy(), n_bins=10
+        #     )
+        #     fraction_of_positives_after, mean_predicted_value_after = calibration_curve(
+        #         class_labels.cpu().numpy(), probs_after[:, class_idx].detach().cpu().numpy(), n_bins=10
+        #     )
+        #
+        #     plt.plot(mean_predicted_value_before, fraction_of_positives_before, "s-",
+        #              label=f"Before Scaling (Class {class_idx})")
+        #     plt.plot(mean_predicted_value_after, fraction_of_positives_after, "s-",
+        #              label=f"After Scaling (Class {class_idx})")
+        #
+        # plt.legend()
+        # plt.xlabel("Mean Predicted Probability")
+        # plt.ylabel("Fraction of Positives")
+        # plt.title("Calibration Curve (Per Class)")
+        # plt.savefig(save_path + "calibration_curve.png")
 
-        ece_metric = MulticlassCalibrationError(num_classes=3, n_bins=10, norm='l1')
-
-        probs_before = torch.nn.functional.softmax(logits, dim=1)
-        probs_after = torch.nn.functional.softmax(logits / self.temperature, dim=1)
-
-        ece_before = ece_metric(probs_before, labels).item()
-        ece_after = ece_metric(probs_after, labels).item()
-        print(f"ECE Before Scaling: {ece_before:.3f}, ECE After Scaling: {ece_after:.3f}")
-
-        num_classes = 3  # Adjust for your dataset
-
-        plt.figure(figsize=(6, 6))
-        plt.plot([0, 1], [0, 1], "k--", label="Perfect Calibration")  # Diagonal reference line
-
-        for class_idx in range(num_classes):
-            class_labels = (labels == class_idx).int()  # Convert to binary: 1 if label matches class, else 0
-
-            fraction_of_positives_before, mean_predicted_value_before = calibration_curve(
-                class_labels.cpu().numpy(), probs_before[:, class_idx].detach().cpu().numpy(), n_bins=10
-            )
-            fraction_of_positives_after, mean_predicted_value_after = calibration_curve(
-                class_labels.cpu().numpy(), probs_after[:, class_idx].detach().cpu().numpy(), n_bins=10
-            )
-
-            plt.plot(mean_predicted_value_before, fraction_of_positives_before, "s-",
-                     label=f"Before Scaling (Class {class_idx})")
-            plt.plot(mean_predicted_value_after, fraction_of_positives_after, "s-",
-                     label=f"After Scaling (Class {class_idx})")
-
-        plt.legend()
-        plt.xlabel("Mean Predicted Probability")
-        plt.ylabel("Fraction of Positives")
-        plt.title("Calibration Curve (Per Class)")
-        plt.show()
-
-    def test_ensemble(self, data_loader, device, loss_fn, test_history):
-        self.to(device)
-        with torch.no_grad():
-            self.eval()
-            for inputs, targets in data_loader:
-                inp, tar = inputs.to(device), targets.to(device)
-
-                outp = self(inp)
-                loss = loss_fn(outp, tar)
-
-                y_pred = self.activation_function(outp)
-                test_history.batch_stats(y_pred=y_pred, y_true=tar, loss=loss)
-            test_history.on_epoch_end()
+    # def test_ensemble(self, data_loader, device, loss_fn, test_history):
+    #     self.to(device)
+    #     with torch.no_grad():
+    #         self.eval()
+    #         for inputs, targets in data_loader:
+    #             inp, tar = inputs.to(device), targets.to(device)
+    #
+    #             outp = self(inp)
+    #             loss = loss_fn(outp, tar)
+    #
+    #             y_pred = self.activation_function(outp)
+    #             test_history.batch_stats(y_pred=y_pred, y_true=tar, loss=loss)
+    #         test_history.on_epoch_end()
 
     def get_subject_predictions(self, data_loader, device):
 
@@ -372,10 +346,8 @@ class Ensemble(torch.nn.Module):
         return result_dict
 
     def ensemble_performance_and_uncertainty(self, data_loader, device, save_path, save_name, save_to_pickle=False,
-                                                 save_to_mlflow=False):
+                                             save_to_mlflow=False):
         self.to(device)
-
-        # todo: Ensemble test_ensemble method does not work with the new data loader... fix this
 
         final_prediction_dict = {}
 

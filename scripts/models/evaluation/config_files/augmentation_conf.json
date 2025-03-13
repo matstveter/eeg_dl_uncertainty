@@ -12,7 +12,8 @@
     "neurons_fc": 256,
     "use_batch_fc": true,
     "use_dropout_fc": true,
-    "dropout_rate_fc": 0.5
+    "dropout_rate_fc": 0.5,
+    "base_seed": 42
   },
   "hyperparameters": {
     "learning_rate": 0.0001,

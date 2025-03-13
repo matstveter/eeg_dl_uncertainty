@@ -3,27 +3,34 @@ import os
 import random
 
 import mlflow
-import numpy
+import numpy as np
 import torch
-from braindecode.augmentation import AugmentedDataLoader
 from torch.utils.data import DataLoader
 
 from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
 from eegDlUncertainty.data.data_generators.augmentations import get_augmentations
 from eegDlUncertainty.data.dataset.CauEEGDataset import CauEEGDataset
-from eegDlUncertainty.data.results.history import History, get_history_objects
+from eegDlUncertainty.data.results.history import TestHistory, get_history_objects
 from eegDlUncertainty.data.results.utils_mlflow import add_config_information
-from eegDlUncertainty.experiments.dataset_shift_experiment import eval_dataset_shifts
-from eegDlUncertainty.experiments.ood_experiments import ood_exp
+from eegDlUncertainty.data.utils import run_ensemble_experiment
 from eegDlUncertainty.experiments.utils_exp import cleanup_function, create_run_folder, get_parameters_from_config, \
     prepare_experiment_environment, \
     setup_experiment_path
-from eegDlUncertainty.models.classifiers.ensemble import Ensemble
 from eegDlUncertainty.models.classifiers.main_classifier import MainClassifier
 
 
+def set_run_seed(seed):
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False  # Can be set to True for performance
+
+
 def main():
-    experiment = "augmentation_ensemble_final"
+    experiment = "FINAL_AUGMENTATION_ENSEMBLE"
+    print(f"Running experiment: {experiment}")
     #########################################################################################################
     # Get arguments and read config file
     #########################################################################################################
@@ -43,44 +50,55 @@ def main():
     # Init variables from config file
     #########################################################################################################
     param = parameters.copy()
-    use_test_set: bool = parameters.pop("use_test_set", False)
     save_path: str = parameters.pop("save_path")
-    run_name: str = args.run_name
-
-    # Data related variables
-    dataset_version: int = parameters.pop("dataset_version")
+    model_name: str = parameters.get("classifier_name")
     prediction: str = parameters.pop("prediction")
+    dataset_version: int = parameters.pop("dataset_version")
+    eeg_epochs = parameters.get('eeg_epochs')
+    overlapping_epochs: bool = parameters.pop("epoch_overlap", False)
+    num_seconds: int = parameters.pop("num_seconds")
     use_age: bool = parameters.pop("use_age")
     age_scaling: str = parameters.pop("age_scaling")
-    num_seconds: int = parameters.pop("num_seconds")
-    eeg_epochs: str = parameters.pop("eeg_epochs")
-    overlapping_epochs: bool = parameters.pop("epoch_overlap", False)
-
-    # Model training
-    model_name: str = parameters.get("classifier_name")
-    train_epochs: int = parameters.pop("training_epochs")
-    batch_size: int = parameters.pop("batch_size")
     learning_rate: float = parameters.pop("learning_rate")
+    batch_size: int = parameters.pop("batch_size")
+    train_epochs: int = parameters.pop("training_epochs")
     earlystopping: int = parameters.pop("earlystopping")
+    base_seed: int = parameters.pop("base_seed")
 
-    # General variables
-    model_p = {
-        'depth': parameters.pop("depth"),
-        'cnn_units': parameters.pop("cnn_units"),
-        'max_kernel_size': parameters.pop("max_kernel_size")
-    }
+    #########################################################################################################
+    # Fixed parameters
+    #########################################################################################################
+    age_noise_prob = 0.5
+    age_noise_level = 0.05
 
-    random_state: int = 42
+    #########################################################################################################
+    # Normal parameters
+    #########################################################################################################
+    depth = parameters.get("depth")
+    cnn_units = parameters.get("cnn_units")
+    max_kernel_size = parameters.get("max_kernel_size")
+    num_fc_layers = parameters.get("num_fc_layers")
+    neurons_fc = parameters.get("neurons_fc")
+    use_batch_fc = parameters.get("use_batch_fc")
+    use_dropout_fc = parameters.get("use_dropout_fc")
+    dropout_rate_fc = parameters.get("dropout_rate_fc")
+    #########################################################################################################
+
+    #########################################################################################################
+    # Augmentation parameters
+    #########################################################################################################
+    augmentation_prob = 0.9
+    num_augmentations = ['timereverse', 'signflip', 'ftsurrogate', 'channelsdropout', 'smoothtimemask']
+    other_args = {'timereverse': {},
+                  'signflip': {},
+                  'ftsurrogate': {'phase_noise_magnitude': 0.1, 'channel_indep': True},
+                  'channelsdropout': {'p_drop': 0.3},
+                  'smoothtimemask': {'mask_len_samples': 15}
+                  }
+    #########################################################################################################
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    random.seed(random_state)
-    numpy.random.seed(random_state)
-    torch.manual_seed(random_state)
-
-    # Experiment specific variables
-    augmentation_prob = parameters.pop("augmentation_prob", 0.5)
-
-    experiment_path, folder_name = setup_experiment_path(save_path=save_path,
-                                                         config_path=config_path,
+    experiment_path, folder_name = setup_experiment_path(save_path=save_path, config_path=config_path,
                                                          experiment=experiment)
     experiment_name = f"{experiment}_experiments"
     prepare_experiment_environment(experiment_name=experiment_name)
@@ -93,20 +111,28 @@ def main():
     train_subjects, val_subjects, test_subjects = dataset.get_splits()
 
     if "test" in config_path:
-        train_subjects = train_subjects[0:100]
-        val_subjects = val_subjects[0:25]
-        test_subjects = test_subjects[0:20]
+        train_subjects = train_subjects[0:30]
+        val_subjects = val_subjects[0:15]
+        test_subjects = val_subjects
+        train_epochs = 5
 
-    if dataset.num_classes == 1:
-        criterion = torch.nn.BCEWithLogitsLoss()
-    else:
-        criterion = torch.nn.CrossEntropyLoss()
+    #########################################################################################################
+    # Loss function
+    #########################################################################################################
+    weight_tensor = dataset.get_class_weights(subjects=train_subjects, normalize=True)
+    weight_tensor = weight_tensor.to(device)
+    criterion = torch.nn.CrossEntropyLoss(weight=weight_tensor)
+    #########################################################################################################
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    experiment_path, folder_name = setup_experiment_path(save_path=save_path, config_path=config_path,
+                                                         experiment=experiment)
+    experiment_name = f"{experiment}_experiments"
+    prepare_experiment_environment(experiment_name=experiment_name)
 
     #########################################################################################################
     # Generators
     #########################################################################################################
-    train_gen = CauDataGenerator(subjects=train_subjects, dataset=dataset, device=device, split="train",
-                                 use_age=use_age)
     val_gen = CauDataGenerator(subjects=val_subjects, dataset=dataset, device=device, split="val", use_age=use_age)
     test_gen = CauDataGenerator(subjects=test_subjects, dataset=dataset, device=device, split="test", use_age=use_age)
 
@@ -114,20 +140,15 @@ def main():
     # Loaders
     #########################################################################################################
     train_loader_list = []
-    num_augmentations = ['timereverse', 'signflip', 'ftsurrogate', 'channelsdropout', 'smoothtimemask']
-
-    other_args = {'timereverse': {},
-                  'signflip': {},
-                  'ftsurrogate': {'phase_noise_magnitude': 0.1, 'channel_indep': True},
-                  'channelsdropout': {'p_drop': 0.3},
-                  'smoothtimemask': {'max_len_samples': 15}
-                  }
 
     for aug in num_augmentations:
-        train_augmentations = get_augmentations(aug_names=[aug], probability=augmentation_prob,
-                                                random_state=random_state, **other_args)
-        train_loader_list.append(AugmentedDataLoader(dataset=train_gen, transforms=train_augmentations, device=device,
-                                                     batch_size=batch_size, shuffle=True))
+        train_augmentations = get_augmentations(aug_names=[aug], probability=augmentation_prob, **other_args)
+        train_gen = CauDataGenerator(subjects=train_subjects, dataset=dataset,
+                                     device=device, split="train",
+                                     use_age=use_age, augmentations=train_augmentations,
+                                     age_noise_prob=age_noise_prob, age_noise_level=age_noise_level)
+        train_loader = DataLoader(train_gen, batch_size=batch_size, shuffle=True)
+        train_loader_list.append(train_loader)
 
     val_loader = DataLoader(val_gen, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_gen, batch_size=batch_size, shuffle=False)
@@ -143,27 +164,34 @@ def main():
         for run_id in range(len(train_loader_list)):
             # Get train loader for current run
             train_loader = train_loader_list[run_id]
-            # Setup MLFLOW run
+            
+            run_seed = base_seed * run_id + run_id
+            set_run_seed(seed=run_seed)
+
+            # Setting depth and cnn units to half of the standard to have simpler base models
             mlflow.start_run(run_name=f"{experiment}_{str(run_id)}", nested=True)
-            # Create run folder
             run_path = create_run_folder(path=experiment_path, index=str(run_id))
-            # Create a model specific hyperparameter dictionary
             hyperparameters = {"in_channels": dataset.num_channels,
                                "num_classes": dataset.num_classes,
                                "time_steps": dataset.eeg_len,
                                "save_path": run_path,
-                               "learning_rate": learning_rate}
-            hyperparameters.update(model_p)
-            # Update the hyperparameter dictionary with the general hyperparameters
+                               "learning_rate": learning_rate,
+                               "cnn_units": cnn_units,
+                               "depth": depth,
+                               "max_kernel_size": max_kernel_size,
+                               "num_fc_layers": num_fc_layers,
+                               "neurons_fc": neurons_fc,
+                               "use_batch_fc": use_batch_fc,
+                               "use_dropout_fc": use_dropout_fc,
+                               "dropout_rate_fc": dropout_rate_fc,
+                               }
             param.update(hyperparameters)
-            # Add the hyperparameters to the MLFLOW run
             add_config_information(config=param, dataset="CAUEEG")
-            # Create a classifier object
+
             classifier = MainClassifier(model_name=model_name, **hyperparameters)
-            # Get history objects
             train_history, val_history = get_history_objects(train_loader=train_loader, val_loader=val_loader,
-                                                             save_path=save_path, num_classes=dataset.num_classes)
-            # Try to train the model, catch CUDA out of memory error, mostly used during hyperparameter search
+                                                             save_path=run_path, num_classes=dataset.num_classes)
+
             try:
                 # Fit the model
                 classifier.fit_model(train_loader=train_loader, training_epochs=train_epochs, device=device,
@@ -178,50 +206,52 @@ def main():
                 print(f"Cuda Out Of Memory -> Cleanup -> Error message: {e}")
                 break
             else:
-                evaluation_history_val = History(num_classes=dataset.num_classes, set_name="test_val",
-                                                 loader_lenght=len(val_loader), save_path=run_path)
-                classifier.test_model(test_loader=val_loader, device=device, test_hist=evaluation_history_val,
-                                      loss_fn=criterion)
-
-                evaluation_history_test = History(num_classes=dataset.num_classes, set_name="test",
-                                                  loader_lenght=len(test_loader), save_path=run_path)
-                classifier.test_model(test_loader=test_loader, device=device, test_hist=evaluation_history_test,
+                test_hist = TestHistory(loader_lenght=len(test_loader), save_path=run_path)
+                classifier.test_model(test_loader=test_loader, device=device, test_hist=test_hist,
                                       loss_fn=criterion)
 
                 train_history.save_to_mlflow()
                 train_history.save_to_pickle()
                 val_history.save_to_mlflow()
                 val_history.save_to_pickle()
-                evaluation_history_val.save_to_mlflow()
-                evaluation_history_val.save_to_pickle()
-                evaluation_history_test.save_to_mlflow()
-                evaluation_history_test.save_to_pickle()
+                test_hist.save_to_mlflow(id=run_id)
 
                 classifiers.append(classifier)
 
             finally:
                 mlflow.end_run()
 
-        # Initialize ensemble model with the trained classifiers
-        ens = Ensemble(classifiers=classifiers, device=device)
-        # Set the temperature scale for the ensemble
-        ens.set_temperature_scale_ensemble(data_loader=val_loader, device=device, criterion=criterion)
-        # Test the ensemble model on the validation and test set
-        ens.ensemble_performance_and_uncertainty(data_loader=val_loader, device=device, save_path=run_path,
-                                                 save_to_mlflow=True, save_to_pickle=True,
-                                                 save_name="ensemble_results_val")
-        ens.ensemble_performance_and_uncertainty(data_loader=test_loader, device=device, save_path=run_path,
-                                                 save_to_mlflow=True, save_to_pickle=True,
-                                                 save_name="ensemble_results_test")
-        # Evaluate the dataset shifts on the ensemble model using the test set
-        eval_dataset_shifts(ensemble_class=ens, test_subjects=test_subjects, dataset=dataset,
-                            device=device, use_age=use_age, batch_size=batch_size,
-                            save_path=run_path)
-        # Run the OOD experiment
-        ood_exp(ensemble_class=ens, dataset_version=dataset_version,
-                num_seconds=num_seconds,
-                age_scaling=age_scaling, device=device, batch_size=batch_size,
-                save_path=experiment_path)
+        run_ensemble_experiment(classifiers=classifiers,
+                                device=device,
+                                experiment_path=experiment_path,
+                                dataset=dataset,
+                                dataset_version=dataset_version,
+                                num_seconds=num_seconds,
+                                age_scaling=age_scaling,
+                                use_age=use_age,
+                                batch_size=batch_size,
+                                criterion=criterion,
+                                test_subjects=test_subjects,
+                                val_loader=val_loader,
+                                test_loader=test_loader)
+
+        # # Initialize ensemble model with the trained classifiers
+        # ens = Ensemble(classifiers=classifiers, device=device)
+        # # Set the temperature scale for the ensemble
+        # ens.set_temperature_scale_ensemble(data_loader=val_loader, device=device, criterion=criterion,
+        #                                    save_path=experiment_path)
+        # ens.ensemble_performance_and_uncertainty(data_loader=test_loader, device=device, save_path=experiment_path,
+        #                                          save_to_mlflow=True, save_to_pickle=True,
+        #                                          save_name="ensemble_results_test")
+        # # Evaluate the dataset shifts on the ensemble model using the test set
+        # eval_dataset_shifts(ensemble_class=ens, test_subjects=test_subjects, dataset=dataset,
+        #                     device=device, use_age=use_age, batch_size=batch_size,
+        #                     save_path=experiment_path)
+        # # Run the OOD experiment
+        # ood_exp(ensemble_class=ens, dataset_version=dataset_version,
+        #         num_seconds=num_seconds,
+        #         age_scaling=age_scaling, device=device, batch_size=batch_size,
+        #         save_path=experiment_path)
 
 
 if __name__ == "__main__":
