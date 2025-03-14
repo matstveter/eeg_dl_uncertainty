@@ -14,7 +14,6 @@ class AgeScaler:
             age_list.append(v['age'])
         ages = np.array(age_list)
 
-        self._no_transformation = False
         if scaling_type == "min_max":
             self._min = np.min(ages)
             self._max = np.max(ages)
@@ -25,36 +24,24 @@ class AgeScaler:
         else:
             raise ValueError("Invalid scaling type. Choose from 'min_max', 'sklearn_scale'.")
 
-    def transform(self, sub_ids, add_noise=False, noise_level=0.1):
+    def transform(self, sub_ids):
         transformed_ages = []
         for sub in sub_ids:
             age = self._dataset_dict[sub]['age']
-            if self._no_transformation:
-                scaled_age = age
+            if self._scaling_type == "min_max":
+                scaled_age = (age - self._min) / (self._max - self._min)
             else:
-                if self._scaling_type == "min_max":
-                    scaled_age = (age - self._min) / (self._max - self._min)
-                else:
-                    scaled_age = self._scaler.transform(np.array([[age]]))[0][0]  # Transform expects 2D input
-
-                if add_noise:
-                    # Inject Gaussian noise
-                    noise = np.random.normal(0, noise_level * abs(scaled_age))
-                    scaled_age += noise
-
+                scaled_age = self._scaler.transform(np.array([[age]]))[0][0]  # Transform expects 2D input
             transformed_ages.append(scaled_age)
         return np.array(transformed_ages)
     
     def inverse_transform(self, scaled_ages):
         original_ages = []
         for scaled_age in scaled_ages:
-            if self._no_transformation:
-                original_age = scaled_age
+            if self._scaling_type == "min_max":
+                original_age = scaled_age * (self._max - self._min) + self._min
             else:
-                if self._scaling_type == "min_max":
-                    original_age = scaled_age * (self._max - self._min) + self._min
-                else:
-                    original_age = self._scaler.inverse_transform(np.array([[scaled_age]]))[0][0]
+                original_age = self._scaler.inverse_transform(np.array([[scaled_age]]))[0][0]
             original_ages.append(original_age)
         return np.array(original_ages)
 

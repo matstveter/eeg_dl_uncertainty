@@ -31,7 +31,7 @@ class EEGDatashiftGenerator(Dataset):
         self.rng = np.random.default_rng(seed=random_seed)
 
         # Get data
-        self.ages = torch.tensor(dataset.load_ages(subjects=subjects, split="test"), dtype=torch.float32)
+        self.ages = torch.tensor(dataset.load_ages(subjects=subjects), dtype=torch.float32)
         inputs, self._subject_keys = dataset.load_eeg_data(subjects=subjects, split="test")
         targets = dataset.load_targets(subjects=subjects, split="test")
 

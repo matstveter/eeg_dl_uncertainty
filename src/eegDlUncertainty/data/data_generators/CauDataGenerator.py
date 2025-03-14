@@ -11,15 +11,21 @@ from eegDlUncertainty.data.dataset.OODDataset import BaseDataset
 
 class CauDataGenerator(Dataset):  # type: ignore[type-arg]
     def __init__(self, subjects: Tuple[str, ...], split: str, dataset: CauEEGDataset, use_age: bool, augmentations=None,
-                 device: Optional[torch.device] = None, age_noise_prob=0.0, age_noise_level: float = 0.1):
+                 device: Optional[torch.device] = None, age_noise_prob=0.0, age_noise_level: float = 0.1,
+                 clamp_age: bool = False, clamp_val=None):
         super().__init__()
         self._use_age = use_age
         self.split = split
         self.augmentations = augmentations if augmentations is not None else []
+
         self.age_noise_prob = age_noise_prob
         self.age_noise_level = age_noise_level
 
-        self.ages = torch.tensor(dataset.load_ages(subjects=subjects, split=split), dtype=torch.float32)
+        self.clamp_age = clamp_age
+        self.clamp_val = clamp_val
+
+        self.ages = torch.tensor(dataset.load_ages(subjects=subjects), dtype=torch.float32)
+
         x, self._subject_keys = dataset.load_eeg_data(subjects=subjects, split=split)
         self._x = torch.tensor(x, dtype=torch.float32)
 
@@ -52,21 +58,13 @@ class CauDataGenerator(Dataset):  # type: ignore[type-arg]
         local_random = random.Random()
         ran = local_random.random()
         if ran < self.age_noise_prob:
-            noise = torch.normal(mean=0, std=self.age_noise_level * torch.abs(age_tensor))
+            noise = torch.normal(mean=0, std=self.age_noise_level, size=age_tensor.shape)
             age_tensor += noise
+
         return age_tensor
 
     def __len__(self) -> int:  # type: ignore[no-any-return]
         return self._x.size()[0]
-
-    # def __getitem__(self, index):
-    #     if self._use_age:
-    #         age_tensor = self.ages[index].clone().detach().view(1, -1)
-    #         age_tensor = age_tensor.expand(1, self._x[index].shape[1])
-    #         combined_data = torch.cat((self._x[index], age_tensor), dim=0)
-    #         return combined_data, self._y[index]
-    #     else:
-    #         return self._x[index], self._y[index]
 
     def __getitem__(self, index) -> Tuple[torch.Tensor, torch.Tensor]:
 
@@ -80,6 +78,9 @@ class CauDataGenerator(Dataset):  # type: ignore[type-arg]
             age_tensor = self.ages[index].clone().detach().view(1, -1)
             if self.age_noise_prob > 0.0 and self.split == 'train':
                 age_tensor = self.apply_age_noise(age_tensor)
+                if self.clamp_age:
+                    age_tensor = torch.clamp(age_tensor, min=self.clamp_val[0], max=self.clamp_val[1])
+
             age_tensor = age_tensor.expand(1, eeg_data.shape[1])
             combined_data = torch.cat((eeg_data, age_tensor), dim=0)
 

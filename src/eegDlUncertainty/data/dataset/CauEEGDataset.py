@@ -488,7 +488,7 @@ class CauEEGDataset:
         pbar.close()
         return data, subject_keys
 
-    def load_ages(self, subjects: Tuple[str, ...], split, add_noise=False, noise_level=0.1) -> numpy.ndarray:
+    def load_ages(self, subjects: Tuple[str, ...]) -> numpy.ndarray:
         """ Load age of the subjects.
 
         This function receives a tuple of subject IDs, it loops through these subjects and extracts the age from
@@ -496,9 +496,6 @@ class CauEEGDataset:
 
         Parameters
         ----------
-        split
-        noise_level
-        add_noise
         subjects: Tuple[str, ...]
             Subject IDs
 
@@ -507,7 +504,7 @@ class CauEEGDataset:
         data: np.ndarray
             structure = [60, 65, 70, ..., n_subjects], shape=(n_subjects, 1)
         """
-        transformed_ages = self._ageScaler.transform(sub_ids=subjects, add_noise=add_noise, noise_level=noise_level)
+        transformed_ages = self._ageScaler.transform(sub_ids=subjects)
         return np.repeat(transformed_ages, self._epochs)
 
     @staticmethod
@@ -628,6 +625,8 @@ class CauEEGDataset:
         class_labels = np.array([self._merged_splits[sub]['class_label'] for sub in subjects])
         class_weights = {}
         total_samples = len(class_labels)
+
+        print(np.unique(class_labels, return_counts=True))
 
         # Calculate the proportion of each class and then the inverse of that proportion as the class weight
         for class_label, count in zip(*np.unique(class_labels, return_counts=True)):

@@ -330,6 +330,7 @@ class InceptionNetwork(BaseClassifier):
             # Ensure age is the right shape (B, 1) where B is the batch size
             if age.dim() == 1:
                 age = age.view(-1, 1)
+
             # Concatenate age along the feature dimension
             x = torch.cat((x, age), dim=1)
 

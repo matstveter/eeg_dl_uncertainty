@@ -914,6 +914,9 @@ class TestHistory:
         self.epoch_loss = 0
         self.subject_keys = []
 
+    def get_mcc(self):
+        return self._mcc[-1]
+
     @staticmethod
     def activation_function(logits, ret_prob=False):
         """
@@ -1069,6 +1072,8 @@ class TestHistory:
         avg_performance = self.calculate_metrics(y_pred=average_predicted_classes,
                                                  y_true=label_list_class, y_prob=average_predicted_probs,
                                                  y_one_hot=label_list_one_hot)
+
+        self._mcc.append(avg_performance['mcc'])
 
         # Majority vote performance
         maj_performance = self.calculate_metrics(y_pred=majority_vote_predicted_classes, y_true=label_list_class)
