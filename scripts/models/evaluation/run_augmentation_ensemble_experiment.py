@@ -69,8 +69,8 @@ def main():
     # Fixed parameters
     #########################################################################################################
     age_noise_prob = 0.5
-    age_noise_level = 0.05
-
+    age_noise_level = 0.2
+    clamp_age = True
     #########################################################################################################
     # Normal parameters
     #########################################################################################################
@@ -146,7 +146,8 @@ def main():
         train_gen = CauDataGenerator(subjects=train_subjects, dataset=dataset,
                                      device=device, split="train",
                                      use_age=use_age, augmentations=train_augmentations,
-                                     age_noise_prob=age_noise_prob, age_noise_level=age_noise_level)
+                                     age_noise_prob=age_noise_prob, age_noise_level=age_noise_level,
+                                     clamp_age=clamp_age)
         train_loader = DataLoader(train_gen, batch_size=batch_size, shuffle=True)
         train_loader_list.append(train_loader)
 
@@ -228,7 +229,6 @@ def main():
                                 dataset_version=dataset_version,
                                 num_seconds=num_seconds,
                                 age_scaling=age_scaling,
-                                use_age=use_age,
                                 batch_size=batch_size,
                                 criterion=criterion,
                                 test_subjects=test_subjects,

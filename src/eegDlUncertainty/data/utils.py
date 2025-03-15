@@ -137,7 +137,7 @@ def view_eeg_from_file_path(file_path: str):
 
 def run_ensemble_experiment(*, classifiers, device,
                             experiment_path, dataset, dataset_version, num_seconds,
-                            age_scaling, use_age, batch_size, criterion,
+                            age_scaling, batch_size, criterion,
                             test_subjects, val_loader, test_loader, save_name="ensemble_test_results"):
 
     # Initialize ensemble model with the trained classifiers
@@ -150,10 +150,14 @@ def run_ensemble_experiment(*, classifiers, device,
                                              save_name=save_name)
     # Evaluate the dataset shifts on the ensemble model using the test set
     eval_dataset_shifts(ensemble_class=ens, test_subjects=test_subjects, dataset=dataset,
-                        device=device, use_age=use_age, batch_size=batch_size,
+                        device=device, use_age=True, batch_size=batch_size,
+                        save_path=experiment_path)
+    # Evaluate the dataset shifts on the ensemble models, when all subjects ages are set to the same value (mean)
+    eval_dataset_shifts(ensemble_class=ens, test_subjects=test_subjects, dataset=dataset,
+                        device=device, use_age=False, batch_size=batch_size,
                         save_path=experiment_path)
     # Run the OOD experiment
     ood_exp(ensemble_class=ens, dataset_version=dataset_version,
             num_seconds=num_seconds,
             age_scaling=age_scaling, device=device, batch_size=batch_size,
-            save_path=experiment_path)
+            save_path=experiment_path, train_dataset=dataset)

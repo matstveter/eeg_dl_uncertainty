@@ -116,7 +116,8 @@ def get_loaders(dataset, device, batch_size):
     return DataLoader(greek_data_gen, batch_size=batch_size, shuffle=False)
 
 
-def get_dataset(dataset_version: int, num_seconds: int, age_scaling: str, device, batch_size: int):
+def get_dataset(dataset_version: int, num_seconds: int, age_scaling: str, device, batch_size: int,
+                train_dataset):
     """
     This function creates DataLoader objects for three different datasets: GreekEEGDataset, MPILemonDataset, and
     TDBrainDataset.
@@ -127,13 +128,19 @@ def get_dataset(dataset_version: int, num_seconds: int, age_scaling: str, device
     age_scaling (str): The scaling method to be applied to the age data in the dataset.
     device (Device): The device on which the data loading operations are to be performed.
     batch_size (int): The number of samples per batch to load.
+    train_dataset (CauEEGDataset): The training dataset to be used for age scaling.
 
     Returns:
     tuple: A tuple containing DataLoader objects for the GreekEEGDataset, MPILemonDataset, and TDBrainDataset.
     """
-    greek = GreekEEGDataset(dataset_version=dataset_version, num_seconds_eeg=num_seconds, age_scaling=age_scaling)
-    mpi = MPILemonDataset(dataset_version=dataset_version, num_seconds_eeg=num_seconds, age_scaling=age_scaling)
-    tdbrain = TDBrainDataset(dataset_version=dataset_version, num_seconds_eeg=num_seconds, age_scaling=age_scaling)
+    ages = train_dataset.get_age_info()
+
+    greek = GreekEEGDataset(dataset_version=dataset_version, num_seconds_eeg=num_seconds, age_scaling=age_scaling,
+                            ages=ages)
+    mpi = MPILemonDataset(dataset_version=dataset_version, num_seconds_eeg=num_seconds, age_scaling=age_scaling,
+                          ages=ages)
+    tdbrain = TDBrainDataset(dataset_version=dataset_version, num_seconds_eeg=num_seconds, age_scaling=age_scaling,
+                             ages=ages)
 
     return (get_loaders(dataset=greek, device=device, batch_size=batch_size),
             get_loaders(dataset=mpi, device=device, batch_size=batch_size),
@@ -300,12 +307,13 @@ def all_dataset_scatter_plots(probs_pred_list, target_classes_list, dataset_name
 
 
 def ood_exp(ensemble_class, dataset_version: int, num_seconds: int, age_scaling: str, device, batch_size: int,
-            save_path: str):
+            save_path: str, train_dataset):
     print("Running OOD experiment")
     greek_loader, mpi_loader, tdbrain_loader = get_dataset(dataset_version=dataset_version,
                                                            num_seconds=num_seconds,
                                                            device=device, batch_size=batch_size,
-                                                           age_scaling=age_scaling)
+                                                           age_scaling=age_scaling,
+                                                           train_dataset=train_dataset)
 
     save_path = check_folder(path=save_path, path_ext="figures")
 

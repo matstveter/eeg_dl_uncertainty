@@ -71,7 +71,8 @@ def main():
     # Fixed parameters
     #########################################################################################################
     age_noise_prob = 0.5
-    age_noise_level = 0.05
+    age_noise_level = 0.2
+    clamp_age = True
     augmentations = ['timereverse', 'smoothtimemask', 'signflip']
     other_parameters = {'smoothtimemask': {'mask_len_samples': 20}}
     augmentation_prob = 0.5
@@ -127,7 +128,7 @@ def main():
 
     train_gen = CauDataGenerator(subjects=train_subjects, dataset=dataset, device=device, split="train",
                                  use_age=use_age, augmentations=train_augmentations,
-                                 age_noise_prob=age_noise_prob, age_noise_level=age_noise_level)
+                                 age_noise_prob=age_noise_prob, age_noise_level=age_noise_level, clamp_age=clamp_age)
     train_loader = DataLoader(train_gen, batch_size=batch_size, shuffle=True)
 
     val_gen = CauDataGenerator(subjects=val_subjects, dataset=dataset, device=device, split="val", use_age=use_age)

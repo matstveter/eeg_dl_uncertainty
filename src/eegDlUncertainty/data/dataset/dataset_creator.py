@@ -407,7 +407,6 @@ def create_tdbrain_dataset(config, conf_path):
                          "\nkey: 'eeg_data': path")
 
     data_info = pd.read_csv(os.path.join(eeg_path, "TDBRAIN_participants_V2.tsv"), sep='\t')
-    print(data_info)
 
     if config['use_derivatives']:
         eeg_path = os.path.join(eeg_path, "derivatives")
@@ -448,17 +447,21 @@ def create_tdbrain_dataset(config, conf_path):
         raw.rename_channels(rename_dict, verbose=False)
         raw.pick(desired_channels, verbose=False)
 
-        end_time = preprocess['start'] + preprocess['num_seconds_per_subject']
+        minimum_end_time = preprocess['start'] + preprocess['num_seconds_per_subject']
 
-        if end_time < raw.times[-1]:
-            # preprocessing
-            raw.crop(tmin=preprocess['start'],
-                     tmax=end_time,
-                     verbose=False, include_tmax=False)
-        else:
-            raw.crop(tmin=preprocess['start'],
-                     tmax=raw.times[-1],
-                     verbose=False, include_tmax=False)
+        # Align available end_time with epochs
+        epoch_length = preprocess['autoreject_epochs']
+        end_time = int(raw.times[-1] / epoch_length) * epoch_length
+
+        # Check if end_time is sufficient
+        if end_time < minimum_end_time:
+            print(f"Data is too short ({end_time}s), skipping {sub}")
+            continue
+
+        # Crop to the aligned epoch boundary
+        raw.crop(tmin=preprocess['start'],
+                 tmax=end_time,
+                 verbose=False, include_tmax=False)
 
         # plot the power spectral density
         if preprocess['use_notch']:
@@ -468,8 +471,6 @@ def create_tdbrain_dataset(config, conf_path):
         # Lowpass and high_pass filter the data
         raw.filter(l_freq=preprocess['low_freq'], h_freq=preprocess['high_freq'], verbose=False)
         raw.resample(preprocess['sfreq'], verbose=False)
-
-        raw.plot(block=True)
 
         raw.set_eeg_reference('average', verbose=False)
 
@@ -534,16 +535,21 @@ def create_greek_dataset(config, conf_path):
 
         raw.pick(desired_channels, verbose=False)
 
-        end_time = preprocess['start'] + preprocess['num_seconds_per_subject']
-        if end_time < raw.times[-1]:
-            # preprocessing
-            raw.crop(tmin=preprocess['start'],
-                     tmax=end_time,
-                     verbose=False, include_tmax=False)
-        else:
-            raw.crop(tmin=preprocess['start'],
-                     tmax=raw.times[-1],
-                     verbose=False, include_tmax=False)
+        minimum_end_time = preprocess['start'] + preprocess['num_seconds_per_subject']
+
+        # Align available end_time with epochs
+        epoch_length = preprocess['autoreject_epochs']
+        end_time = int(raw.times[-1] / epoch_length) * epoch_length
+
+        # Check if end_time is sufficient
+        if end_time < minimum_end_time:
+            print(f"Data is too short ({end_time}s), skipping {sub}")
+            continue
+
+        # Crop to the aligned epoch boundary
+        raw.crop(tmin=preprocess['start'],
+                 tmax=end_time,
+                 verbose=False, include_tmax=False)
 
         if preprocess['use_notch'] and not config['use_derivatives']:
             # plot the power spectral density
@@ -579,6 +585,9 @@ def create_greek_dataset(config, conf_path):
 
             # Check if the data is too short
             remaining_time = data.shape[1] / preprocess['sfreq']
+
+            print(remaining_time)
+
             if remaining_time < preprocess['num_seconds_per_subject']:
                 print(f"Data is too short, skipping {sub}")
                 continue
@@ -623,17 +632,21 @@ def create_MPI_dataset(config, conf_path):
                 print(f"Skipping subject: {sub}")
                 continue
 
-            end_time = preprocess['start'] + preprocess['num_seconds_per_subject']
+            minimum_end_time = preprocess['start'] + preprocess['num_seconds_per_subject']
 
-            if end_time < raw.times[-1]:
-                # preprocessing
-                raw.crop(tmin=preprocess['start'],
-                         tmax=end_time,
-                         verbose=False, include_tmax=False)
-            else:
-                raw.crop(tmin=preprocess['start'],
-                         tmax=raw.times[-1],
-                         verbose=False, include_tmax=False)
+            # Align available end_time with epochs
+            epoch_length = preprocess['autoreject_epochs']
+            end_time = int(raw.times[-1] / epoch_length) * epoch_length
+
+            # Check if end_time is sufficient
+            if end_time < minimum_end_time:
+                print(f"Data is too short ({end_time}s), skipping {sub}")
+                continue
+
+            # Crop to the aligned epoch boundary
+            raw.crop(tmin=preprocess['start'],
+                     tmax=end_time,
+                     verbose=False, include_tmax=False)
 
             if preprocess['use_notch']:
                 try:

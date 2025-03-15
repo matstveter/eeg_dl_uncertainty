@@ -5,7 +5,7 @@ from sklearn.preprocessing import StandardScaler
 
 
 class AgeScaler:
-    def __init__(self, dataset_dict, scaling_type):
+    def __init__(self, dataset_dict, scaling_type, min_age=None, max_age=None):
         self._dataset_dict = dataset_dict
         self._scaling_type = scaling_type
 
@@ -14,15 +14,25 @@ class AgeScaler:
             age_list.append(v['age'])
         ages = np.array(age_list)
 
+        self._ages = ages
+
         if scaling_type == "min_max":
-            self._min = np.min(ages)
-            self._max = np.max(ages)
+            if min_age is not None and max_age is not None:
+                self._min = min_age
+                self._max = max_age
+            else:
+                self._min = np.min(ages)
+                self._max = np.max(ages)
         elif scaling_type == "sklearn_scale":
             ages_reshaped = ages.reshape(-1, 1)  # Reshape to 2D array for sklearn
             self._scaler = StandardScaler()
             self._scaler.fit(ages_reshaped)
         else:
             raise ValueError("Invalid scaling type. Choose from 'min_max', 'sklearn_scale'.")
+
+    @property
+    def ages(self):
+        return self._ages
 
     def transform(self, sub_ids):
         transformed_ages = []

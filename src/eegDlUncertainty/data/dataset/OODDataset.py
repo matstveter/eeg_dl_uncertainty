@@ -16,7 +16,7 @@ from eegDlUncertainty.data.dataset.misc_classes import AgeScaler
 
 
 class BaseDataset(abc.ABC):
-    def __init__(self, *, dataset_version, num_seconds_eeg, age_scaling):
+    def __init__(self, *, dataset_version, num_seconds_eeg, age_scaling, ages=None):
         self._dataset_version = dataset_version
         self._num_seconds_eeg = num_seconds_eeg
         self._age_scaling = age_scaling
@@ -56,7 +56,7 @@ class BaseDataset(abc.ABC):
         # This function checks the labels, checks subjects and transforms the self._labels to a dict with only needed
         # info
         self.prepare_dataset()
-        self._set_age_scaler()
+        self._set_age_scaler(ages=ages)
 
     @property
     def subjects(self):
@@ -82,8 +82,32 @@ class BaseDataset(abc.ABC):
 
             epochs = mne.make_fixed_length_epochs(raw=raw, duration=self._num_seconds_eeg,
                                                   preload=True, verbose=False)
-            epoch_numpy_data = epochs.get_data(copy=False)
-            npy_data = epoch_numpy_data[:self._num_epochs, :, :]
+            epoch_npy_data = epochs.get_data(copy=False)
+
+            max_num_epochs, _, _ = epoch_npy_data.shape
+            if max_num_epochs < self._num_epochs:
+                raise ValueError(f"Not enough epochs for subject: {sub}")
+
+            # If the number of available epochs is equal to the number of epochs we want, we can just use the data
+            if max_num_epochs == self._num_epochs:
+                npy_data = epoch_npy_data
+            else:
+                buffer_epochs = 2
+                # Spread out epochs maximally, avoiding buffer epochs at the end
+                indices = np.linspace(0, max_num_epochs - 1 - buffer_epochs, self._num_epochs + 1)
+                indices = np.round(indices).astype(int)
+                indices = np.unique(indices)[:-1]
+
+                # If evenly spaced indices fail, try random sampling
+                if len(indices) != self._num_epochs:
+                    available_indices = np.arange(0, max_num_epochs - buffer_epochs)
+                    if len(available_indices) >= self._num_epochs:
+                        indices = np.sort(np.random.choice(available_indices, size=self._num_epochs, replace=False))
+                    else:
+                        # As final fallback, select the first available epochs
+                        indices = np.arange(0, self._num_epochs)
+
+                npy_data = epoch_npy_data[indices, :, :]
 
             subject_keys.extend([sub] * self._num_epochs)
 
@@ -124,12 +148,8 @@ class BaseDataset(abc.ABC):
         data: np.ndarray
             structure = [60, 65, 70, ..., n_subjects], shape=(n_subjects, 1)
         """
-        transformed_ages = self._ageScaler.transform(sub_ids=self.subjects, add_noise=add_noise)
-
-        if self._num_epochs == 1:
-            return transformed_ages
-        else:
-            return np.repeat(transformed_ages, self._num_epochs)
+        transformed_ages = self._ageScaler.transform(sub_ids=self.subjects)
+        return np.repeat(transformed_ages, self._num_epochs)
 
     @staticmethod
     def __normalize_data(x):
@@ -159,8 +179,15 @@ class BaseDataset(abc.ABC):
         # Get only numpy files, and remove the numpy ending
         return [sub.split(sep=".")[0] for sub in files if ".npy" in sub]
 
-    def _set_age_scaler(self):
-        self._ageScaler = AgeScaler(dataset_dict=self._labels, scaling_type=self._age_scaling)
+    def _set_age_scaler(self, ages):
+
+        if ages is not None:
+            age_min = ages[0]
+            age_max = ages[1]
+            self._ageScaler = AgeScaler(dataset_dict=self._labels, scaling_type=self._age_scaling,
+                                        min_age=age_min, max_age=age_max)
+        else:
+            self._ageScaler = AgeScaler(dataset_dict=self._labels, scaling_type=self._age_scaling)
 
     @abstractmethod
     def prepare_dataset(self):

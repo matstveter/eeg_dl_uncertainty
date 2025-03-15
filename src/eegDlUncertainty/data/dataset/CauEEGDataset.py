@@ -57,6 +57,7 @@ class CauEEGDataset:
             raise KeyError(f"Specified dataset version: {dataset_version} does not exist, "
                            f"potential datasets are: {os.listdir(config.get('base_dataset_path'))}")
 
+        self._age_scaling = age_scaling
         self._ageScaler = AgeScaler(dataset_dict=self._merged_splits, scaling_type=age_scaling)
         self._overlapping_epochs = overlapping_epochs
         self._eeg_len = int(eeg_len_seconds * self.get_eeg_info()['sfreq'])
@@ -107,6 +108,20 @@ class CauEEGDataset:
     @property
     def eeg_info(self):
         return self._eeg_info
+
+    def get_age_info(self):
+        """This function returns the max and min of the ages in the dataset """
+        if self._age_scaling == "sklearn_scale":
+            raise NotImplementedError("This function is not yet implemented for sklearn scaling")
+        return np.min(self._ageScaler.ages), np.max(self._ageScaler.ages)
+
+    def get_mean_age(self):
+        if self._age_scaling == "sklearn_scale":
+            raise NotImplementedError("This function is not yet implemented for sklearn scaling")
+        min_age, max_age = self.get_age_info()
+        mean_age = np.mean(self._ageScaler.ages)
+        scaled_mean = (mean_age - min_age) / (max_age - min_age)
+        return scaled_mean
 
     @staticmethod
     def _merge_splits(train_split: Dict[str, Dict[str, Any]], val_split: Dict[str, Dict[str, Any]],
@@ -465,13 +480,20 @@ class CauEEGDataset:
             if max_num_epochs == self._epochs:
                 npy_data = epoch_npy_data
             else:
-                # Spread out the epochs maximally
-                indices = np.linspace(0, max_num_epochs - 1, self._epochs + 1)
+                buffer_epochs = 2
+                # Spread out epochs maximally, avoiding buffer epochs at the end
+                indices = np.linspace(0, max_num_epochs - 1 - buffer_epochs, self._epochs + 1)
                 indices = np.round(indices).astype(int)
                 indices = np.unique(indices)[:-1]
 
+                # If evenly spaced indices fail, try random sampling
                 if len(indices) != self._epochs:
-                    indices = np.linspace(0, max_num_epochs, num=self._epochs, endpoint=False, dtype=int)
+                    available_indices = np.arange(0, max_num_epochs - buffer_epochs)
+                    if len(available_indices) >= self._epochs:
+                        indices = np.sort(np.random.choice(available_indices, size=self._epochs, replace=False))
+                    else:
+                        # As final fallback, select the first available epochs
+                        indices = np.arange(0, self._epochs)
 
                 npy_data = epoch_npy_data[indices, :, :]
 
@@ -625,8 +647,6 @@ class CauEEGDataset:
         class_labels = np.array([self._merged_splits[sub]['class_label'] for sub in subjects])
         class_weights = {}
         total_samples = len(class_labels)
-
-        print(np.unique(class_labels, return_counts=True))
 
         # Calculate the proportion of each class and then the inverse of that proportion as the class weight
         for class_label, count in zip(*np.unique(class_labels, return_counts=True)):

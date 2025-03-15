@@ -17,7 +17,6 @@ class EEGDatashiftGenerator(Dataset):
                  use_same_shift, random_seed=None, device=None, plot_difference=False, **kwargs):
         super().__init__()
         # Dataset information
-        self._use_age = use_age
         self._shift_type = shift_type
         self._eeg_info = dataset.eeg_info
         self._use_notch = False
@@ -30,8 +29,13 @@ class EEGDatashiftGenerator(Dataset):
         # Set random generator
         self.rng = np.random.default_rng(seed=random_seed)
 
-        # Get data
         self.ages = torch.tensor(dataset.load_ages(subjects=subjects), dtype=torch.float32)
+
+        if not use_age:
+            mean_age = dataset.get_mean_age()
+            # Set all ages to the mean age
+            self.ages = torch.ones_like(self.ages) * mean_age
+
         inputs, self._subject_keys = dataset.load_eeg_data(subjects=subjects, split="test")
         targets = dataset.load_targets(subjects=subjects, split="test")
 
@@ -699,14 +703,11 @@ class EEGDatashiftGenerator(Dataset):
         return self._x.size()[0]
 
     def __getitem__(self, index):
-        if self._use_age:
-            age_tensor = self.ages[index].clone().detach().view(1, -1)
-            age_tensor = age_tensor.expand(1, self._x[index].shape[1])
-            combined_data = torch.cat((self._x[index], age_tensor), dim=0)
+        age_tensor = self.ages[index].clone().detach().view(1, -1)
+        age_tensor = age_tensor.expand(1, self._x[index].shape[1])
+        combined_data = torch.cat((self._x[index], age_tensor), dim=0)
 
-            return combined_data, self._y[index], index
-        else:
-            return self._x[index], self._y[index], index
+        return combined_data, self._y[index], index
 
     def get_subject_keys_from_indices(self, indices):
         return [self._subject_keys[i] for i in indices]
