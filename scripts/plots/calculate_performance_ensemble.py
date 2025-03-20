@@ -78,8 +78,8 @@ def calculate_ensemble_metrics(result_path, folder_lists, ensemble_name):
 
 
 if __name__ == '__main__':
-    res_path = "/home/tvetern/PhD/dl_uncertainty/results/"
-    ensemble_to_calculate = "MCD"
+    res_path = "/home/tvetern/PhD/dl_uncertainty/results/old_exp/new/"
+    ensemble_to_calculate = "WEIGHT"
 
     folder_list = get_clean_folders(res_path)
     folder_list = get_remaining_folders_without_name(folder_list=folder_list, name="NORMAL")

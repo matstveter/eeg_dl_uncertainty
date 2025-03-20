@@ -94,7 +94,7 @@ def main():
     fge_num_models: int = 20
     fge_epochs_per_cycle: int = 25
     fge_cycle_start_lr: float = 0.01
-    fge_cycle_end_lr: float = fge_cycle_start_lr / 10
+    fge_cycle_end_lr: float = fge_cycle_start_lr / 100
 
     #########################################################################################################
 

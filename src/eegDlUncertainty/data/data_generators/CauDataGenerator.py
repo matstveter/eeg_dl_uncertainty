@@ -32,7 +32,7 @@ class CauDataGenerator(Dataset):  # type: ignore[type-arg]
         x, self._subject_keys = dataset.load_eeg_data(subjects=subjects, split=split)
         self._x = torch.tensor(x, dtype=torch.float32)
 
-        targets = torch.tensor(dataset.load_targets(subjects=subjects, split=split, get_stats=True),
+        targets = torch.tensor(dataset.load_targets(subjects=subjects, split=split),
                                dtype=torch.float32)
 
         if len(targets.shape) == 1:

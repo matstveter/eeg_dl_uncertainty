@@ -75,11 +75,6 @@ class BaseDataset(abc.ABC):
             npy_data = self.__normalize_data(x=npy_data)
             raw = mne.io.RawArray(data=npy_data, info=self.get_eeg_info(), verbose=False)
 
-            if plot:
-                matplotlib.use("TKAgg")
-                raw.plot(block=True)
-                plt.close()
-
             epochs = mne.make_fixed_length_epochs(raw=raw, duration=self._num_seconds_eeg,
                                                   preload=True, verbose=False)
             epoch_npy_data = epochs.get_data(copy=False)

@@ -113,7 +113,7 @@ def eval_dataset_shifts(ensemble_class, test_subjects, dataset, device, use_age,
 
     # Phase shift
     for p in phase_shift:
-        print(f"\n----------- Evaluating phase shift: {p} SAMPLED -----------\n")
+        print(f"\n----------- Evaluating phase shift: {p} -----------\n")
         phase = evaluate_shift(shift_type="phase_shift",
                                ensemble_class=ensemble_class,
                                test_subjects=test_subjects,
@@ -133,7 +133,7 @@ def eval_dataset_shifts(ensemble_class, test_subjects, dataset, device, use_age,
     amplitude_modulation = [0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 1.5, 2.0, 2.5, 4.0, 6.0, 8.0]
 
     for s in amplitude_modulation:
-        print(f"\n----------- Evaluating amplitude: {s} SAMPLED -----------\n")
+        print(f"\n----------- Evaluating amplitude: {s}  -----------\n")
         scalar_c = evaluate_shift(shift_type="amplitude_change",
                                   ensemble_class=ensemble_class,
                                   test_subjects=test_subjects,
@@ -154,7 +154,7 @@ def eval_dataset_shifts(ensemble_class, test_subjects, dataset, device, use_age,
 
     # Gaussian noise
     for g in gaussian_std:
-        print(f"\n----------- Evaluating gaussian noise: {g} SAMPLED -----------\n")
+        print(f"\n----------- Evaluating gaussian noise: {g}  -----------\n")
         gaussian_ch = evaluate_shift(shift_type="gaussian",
                                      ensemble_class=ensemble_class,
                                      test_subjects=test_subjects,
@@ -164,7 +164,7 @@ def eval_dataset_shifts(ensemble_class, test_subjects, dataset, device, use_age,
                                      batch_size=batch_size,
                                      save_path=save_path,
                                      gaussian_std=g)
-        gaussian_results[f"gaussian_sampled_{g}"] = gaussian_ch
+        gaussian_results[f"gaussian_{g}"] = gaussian_ch
 
     save_dict_to_pickle(gaussian_results, save_path, "gaussian_results")
     ############################################################################################################
@@ -176,7 +176,7 @@ def eval_dataset_shifts(ensemble_class, test_subjects, dataset, device, use_age,
 
     for num_sinus_wave in num_sinus_waves:
         for max_drift in max_drift_values:
-            print(f"\n----------- Evaluating baseline drift: {max_drift} / {num_sinus_wave} SAMPLED -----------\n")
+            print(f"\n----------- Evaluating baseline drift: {max_drift} / {num_sinus_wave} -----------\n")
             drift_results = evaluate_shift(
                 shift_type="baseline_drift",
                 ensemble_class=ensemble_class,
@@ -198,7 +198,7 @@ def eval_dataset_shifts(ensemble_class, test_subjects, dataset, device, use_age,
     max_warp_values = [0.01, 0.02, 0.05, 0.1, 0.15, 0.2, 0.25, 0.35, 0.5, 0.75]
 
     for max_warp in max_warp_values:
-        print(f"\n----------- Evaluating timewarp: {max_warp} SAMPLED -----------\n")
+        print(f"\n----------- Evaluating timewarp: {max_warp} -----------\n")
         drift_results = evaluate_shift(
             shift_type="timewarp",
             ensemble_class=ensemble_class,

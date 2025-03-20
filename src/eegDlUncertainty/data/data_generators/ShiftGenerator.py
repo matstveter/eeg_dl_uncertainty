@@ -57,7 +57,7 @@ class EEGDatashiftGenerator(Dataset):
             self._gaussian_std = kwargs.get("gaussian_std")
             # If we want to use the same shift for all channels
             if self._same_shift:
-                self._gaussian_std = self.rng.normal(self._gaussian_std, self._gaussian_std * 0.75, 6000)
+                self._gaussian_std = self.rng.normal(0, self._gaussian_std, 6000)
         elif shift_type == "baseline_drift":
             if "max_drift_amplitude" not in kwargs:
                 raise ValueError("Baseline drift requires the maximum drift amplitude")
@@ -66,8 +66,6 @@ class EEGDatashiftGenerator(Dataset):
                 raise ValueError("Baseline drift requires the number of sinusoids")
             self._num_sinusoids = kwargs.get("num_sinusoids")
 
-            if self._same_shift:
-                self._drift = self._calculate_drift_signal(n_times=6000)
         elif shift_type == "timewarp":
             if "max_warp_ratio" not in kwargs:
                 raise ValueError("Timewarp requires the maximum warp ratio")
@@ -135,7 +133,7 @@ class EEGDatashiftGenerator(Dataset):
                             noise = self._gaussian_std
                         else:
                             # Sample a random noise value from self._gaussian_std
-                            noise = self.rng.normal(self._gaussian_std, self._gaussian_std * 0.75, 6000)
+                            noise = self.rng.normal(0, self._gaussian_std, 6000)
 
                         new_arr = ch + noise
                     elif self._shift_type == "phase_shift":
@@ -144,7 +142,8 @@ class EEGDatashiftGenerator(Dataset):
                             channel_phi = self._phase_shift
                         else:
                             # Sample a random phase shift value from self._phase_shift
-                            abs_shift = self.rng.uniform(self._phase_shift * 0.75, self._phase_shift)
+                            abs_shift = self.rng.uniform(self._phase_shift * 0.75,
+                                                         self._phase_shift * 1.25)
                             channel_phi = abs_shift * self.rng.choice([-1, 1])
                         # Plot difference after shift
                         new_arr = self._phase_shift_eeg(data=ch, phi=channel_phi)
@@ -154,7 +153,8 @@ class EEGDatashiftGenerator(Dataset):
                         if self._same_shift:
                             channel_shift = self._circular_shift
                         else:
-                            abs_shift = self.rng.integers(int(self._circular_shift * 0.75), self._circular_shift)
+                            abs_shift = self.rng.integers(int(self._circular_shift * 0.75),
+                                                          int(self._circular_shift * 1.25))
                             channel_shift = abs_shift * self.rng.choice([-1, 1])
 
                         new_arr = self.circular_shift_eeg(data=ch, shift=channel_shift)
@@ -164,8 +164,8 @@ class EEGDatashiftGenerator(Dataset):
                         if self._same_shift:
                             channel_scalar = self._scalar_multi
                         else:
-                            abs_shift = self.rng.uniform(self._scalar_multi * 0.75, self._scalar_multi)
-                            channel_scalar = abs_shift * self.rng.choice([-1, 1])
+                            channel_scalar = self.rng.uniform(self._scalar_multi * 0.75,
+                                                              self._scalar_multi * 1.25)
 
                         new_arr = ch * channel_scalar
                     elif self._shift_type in ("theta_bandpass", "alpha_bandpass", "beta_bandpass", "delta_bandpass",
@@ -173,10 +173,7 @@ class EEGDatashiftGenerator(Dataset):
                         new_arr = self._remove_frequency_band(data=ch)
                     elif self._shift_type == "baseline_drift":
 
-                        if self._same_shift:
-                            new_arr = ch + self._drift
-                        else:
-                            new_arr = self._add_baseline_drift(data=ch)
+                        new_arr = self._add_baseline_drift(data=ch)
 
                     elif self._shift_type == "timewarp":
                         if self._same_shift:
@@ -285,7 +282,7 @@ class EEGDatashiftGenerator(Dataset):
         if self._same_shift:
             shift_val = self._peak_shift
         else:
-            shift_val = self.rng.uniform(self._peak_shift * 0.5, self._peak_shift * 1.25) * self.rng.choice([-1, 1])
+            shift_val = self.rng.uniform(self._peak_shift * 0.75, self._peak_shift * 1.25) * self.rng.choice([-1, 1])
 
         # Apply the frequency shift by modulating the analytic signal with a complex exponential.
         # This shifts every frequency component in the alpha band by shift_val.
@@ -320,12 +317,11 @@ class EEGDatashiftGenerator(Dataset):
         freq = self.rng.uniform(0.01, 0.2)
         phase = self.rng.uniform(0, 2 * np.pi)
 
-        max_warp_ratio = self.rng.uniform(self._max_warp_ratio * 0.75, self._max_warp_ratio)
+        max_warp_ratio = self.rng.uniform(self._max_warp_ratio * 0.75, self._max_warp_ratio * 1.25)
 
         # Compute the warp offsets:
         # We compute a sine wave based on the random frequency and phase.
         # The sine wave oscillates between -1 and 1, so after multiplying by warp_amplitude,
-        # the offsets vary between -max_warp_ratio and +max_warp_ratio.
         # Dividing t_original by n_times scales the sine function so that its period
         # is relative to the length of the data.
         warp_offsets = max_warp_ratio * np.sin(2 * np.pi * freq * t_original / n_times + phase)
@@ -395,12 +391,12 @@ class EEGDatashiftGenerator(Dataset):
         # Create a time axis over which to define our sinusoidal waves
         time_axis = np.linspace(0, 2 * np.pi, n_times)
 
-        # Overall amplitude of the drift
-        drift_amplitude = self._max_drift_amplitude
+        drift_amplitude = self.rng.uniform(self._max_drift_amplitude * 0.75, self._max_drift_amplitude * 1.25)
+        num_sinusoids = self.rng.integers(max(1, int(self._num_sinusoids * 0.75)), int(self._num_sinusoids * 1.25) + 1)
 
         # Generate multiple sinusoids with random frequencies and phases
         sinusoids = []
-        for _ in range(self._num_sinusoids):
+        for _ in range(num_sinusoids):
             freq = self.rng.uniform(0.01, 0.2)  # random low frequency
             phase = self.rng.uniform(0, 2 * np.pi)  # random starting phase
             wave = np.sin(freq * time_axis + phase)
@@ -416,39 +412,6 @@ class EEGDatashiftGenerator(Dataset):
         data_drifted += drift_amplitude * combined
 
         return data_drifted
-
-    def _calculate_drift_signal(self, n_times: int) -> np.ndarray:
-        """
-        Computes a baseline drift signal as a combination of low-frequency sinusoids.
-
-        Parameters
-        ----------
-        n_times : int
-            Number of time points in the signal.
-
-        Returns
-        -------
-        drift_signal : np.ndarray
-            A 1D array of shape (n_times,) representing the computed drift.
-        """
-        # Create time axis over which to define sinusoids
-        time_axis = np.linspace(0, 2 * np.pi, n_times)
-        # Overall amplitude of the drift
-        drift_amplitude = self._max_drift_amplitude
-
-        # Generate and combine multiple sinusoids
-        combined = np.zeros_like(time_axis)
-        for _ in range(self._num_sinusoids):
-            freq = self.rng.uniform(0.1, 0.75)  # Random low frequency
-            phase = self.rng.uniform(0, 2 * np.pi)  # Random phase
-            wave = np.sin(freq * time_axis + phase)
-            # Weight each wave with a random factor
-            weight = self.rng.uniform(0.5, 1.0)
-            combined += weight * wave
-
-        # Scale the combined waveform by the drift amplitude
-        drift_signal = drift_amplitude * combined
-        return drift_signal
 
     @staticmethod
     def circular_shift_eeg(data: np.ndarray, shift: int) -> np.ndarray:

@@ -386,10 +386,6 @@ class CauEEGDataset:
         elif self._task_name == 'CAUEEG-Dementia benchmark':
             class_labels: numpy.ndarray = torch.nn.functional.one_hot(  # type: ignore[type-arg]
                 torch.from_numpy(class_labels), num_classes=len(self._class_name_to_label)).numpy()
-            if get_stats:
-                self.get_label_statistics(class_labels=class_labels,
-                                          classes={"0": "Normal", "1": "MCI", "2": "Dementia"},
-                                          split=split)
 
             return class_labels
         else:
@@ -440,7 +436,6 @@ class CauEEGDataset:
 
         Examples
         --------
-        >>> self.load_eeg_data(('subject1', 'subject2'), plot=True)
         # This will load the EEG data for 'subject1' and 'subject2', plot the raw data, and return the data array.
         """
 

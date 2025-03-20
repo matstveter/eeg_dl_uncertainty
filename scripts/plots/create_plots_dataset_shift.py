@@ -40,18 +40,11 @@ def interpolation_plots(df):
 
 def loop_through_shifts(df, shift_key):
     first_sort = df[df["shift_name"].str.contains(shift_key, case=False)]
-    first_sort = first_sort[first_sort["shift_name"].str.contains("sampled", case=False)]
     baseline_df = df[df["shift_name"] == "baseline"]
 
     combined_df = pd.concat([baseline_df, first_sort], ignore_index=True)
 
     plot_shift(df=combined_df, key=shift_key)
-
-    # # Get the unique shift intensities
-    # shift_names = list(first_sort["shift_name"].unique())
-    #
-    # for s in shift_names:
-    #     plot_shift(df=df, key=s)
 
 
 def bandstop_plots(df):
@@ -177,7 +170,7 @@ def main(result_path, folders):
 
 
 if __name__ == '__main__':
-    res_path = "/home/tvetern/PhD/dl_uncertainty/results/old_exp/"
+    res_path = "/home/tvetern/PhD/dl_uncertainty/results/old_exp/new/"
     folder_list = get_clean_folders(res_path)
     folder_list = get_remaining_folders_without_name(folder_list=folder_list, name="NORMAL")
 

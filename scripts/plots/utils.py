@@ -249,7 +249,7 @@ def create_a_dataframe(res_dict):
             for ens_method, results in ensemble_methods.items():
 
                 # We simplify this to only include the average_epochs_merge_softmax
-                if ens_method == "average_epochs_merge_softmax":
+                if ens_method == "average_epochs_merge_logits":
                     # Extract metrics into a flat dict
                     t_d = get_shift_metrics(results)
 
