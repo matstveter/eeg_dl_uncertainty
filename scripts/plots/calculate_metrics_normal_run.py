@@ -3,9 +3,10 @@ import os
 import numpy as np
 import torch
 from mypy.memprofile import defaultdict
+from sklearn.metrics import precision_score, recall_score, roc_auc_score
 
 from scripts.plots.utils import calculate_confidence_interval, get_clean_folders, get_folders_based_on_name, \
-    get_metrics, read_pkl_to_dict
+    get_metrics_, read_pkl_to_dict
 
 
 def calculate_normal_runs(folders, result_path):
@@ -51,15 +52,11 @@ def calculate_metrics(subject_keys, predictions, true_classes):
         if subject_keys not in subject_labels:
             subject_labels[subject_keys] = true_class
 
-    before_softmax = []
     after_softmax = []
 
     y_one_hot = []
 
     for key, preds in subject_preds.items():
-        # Mean of the predictions
-        mean_logits = torch.mean(torch.stack(preds), dim=0)
-        before_softmax.append(mean_logits)
 
         # Softmax of the preds, not the mean_logits
         softm = torch.nn.functional.softmax(torch.stack(preds), dim=1)
@@ -69,18 +66,11 @@ def calculate_metrics(subject_keys, predictions, true_classes):
 
         y_one_hot.append(subject_labels[key].numpy())
 
-    # Do softmax
-    before_softmax = torch.nn.functional.softmax(torch.stack(before_softmax), dim=1)
-
     # numpy conversion
-    before_softmax = np.array(before_softmax)
     after_softmax = np.array(after_softmax)
     y_one_hot = np.array(y_one_hot)
 
-    before_acc, before_auc = get_metrics(y_one_hot=y_one_hot, y_prob=before_softmax)
-    after_acc, after_auc = get_metrics(y_one_hot=y_one_hot, y_prob=after_softmax)
-
-    return before_acc, before_auc, after_acc, after_auc
+    return get_metrics_(y_one_hot=y_one_hot, y_prob=after_softmax)
 
 
 def calculate_metrics_after(folders, result_path):
@@ -88,10 +78,17 @@ def calculate_metrics_after(folders, result_path):
 
     extension = "1/test_set_dict.pkl"
 
-    accuracy_logits = []
-    auc_logits = []
     accuracy_softmax = []
     auc_softmax = []
+    auc_class_0 = []
+    auc_class_1 = []
+    auc_class_2 = []
+    precision_class_0 = []
+    precision_class_1 = []
+    precision_class_2 = []
+    recall_class_0 = []
+    recall_class_1 = []
+    recall_class_2 = []
 
     for folder in folders:
         abs_path = os.path.join(result_path, folder, extension)
@@ -101,33 +98,46 @@ def calculate_metrics_after(folders, result_path):
         predictions = data_dict['predictions']['y_pred_tensor']
         y_true = data_dict['predictions']['y_true_tensor']
 
-        log_acc, log_auc, sof_acc, sof_auc = calculate_metrics(subjects, predictions, y_true)
+        accuracy, auc, auc_class, precision_class, recall_class = calculate_metrics(subjects, predictions, y_true)
 
-        accuracy_logits.append(log_acc)
-        auc_logits.append(log_auc)
-        accuracy_softmax.append(sof_acc)
-        auc_softmax.append(sof_auc)
+        accuracy_softmax.append(accuracy)
+        auc_softmax.append(auc)
+        auc_class_0.append(auc_class[0])
+        auc_class_1.append(auc_class[1])
+        auc_class_2.append(auc_class[2])
+        precision_class_0.append(precision_class[0])
+        precision_class_1.append(precision_class[1])
+        precision_class_2.append(precision_class[2])
+        recall_class_0.append(recall_class[0])
+        recall_class_1.append(recall_class[1])
+        recall_class_2.append(recall_class[2])
 
-    print("----------- AVERAGE -----------")
-    print("----------- Key: MERGE LOGITS -----------")
-    mean, conf_interval = calculate_confidence_interval(metric_list=accuracy_logits)
-    print(f"ACCURACY: Confidence interval: {mean} +/- {conf_interval}")
-    mean, conf_interval = calculate_confidence_interval(metric_list=auc_logits)
-    print(f"AUC: Confidence interval: {mean} +/- {conf_interval}")
+    # Create a dictionary to store the metrics
+    metrics_dict = {
+        "accuracy": accuracy_softmax,
+        "auc": auc_softmax,
+        "auc_class_0": auc_class_0,
+        "auc_class_1": auc_class_1,
+        "auc_class_2": auc_class_2,
+        "precision_class_0": precision_class_0,
+        "precision_class_1": precision_class_1,
+        "precision_class_2": precision_class_2,
+        "recall_class_0": recall_class_0,
+        "recall_class_1": recall_class_1,
+        "recall_class_2": recall_class_2
+    }
 
-    print("----------- Key: MERGE SOFTMAX -----------")
-    mean, conf_interval = calculate_confidence_interval(metric_list=accuracy_softmax)
-    print(f"ACCURACY: Confidence interval: {mean} +/- {conf_interval}")
-    mean, conf_interval = calculate_confidence_interval(metric_list=auc_softmax)
-    print(f"AUC: Confidence interval: {mean} +/- {conf_interval}")
+    for key, val in metrics_dict.items():
+        mean, conf_interval = calculate_confidence_interval(metric_list=val)
+        print(f"{key:<20}: ${mean:.2f}\pm{conf_interval:.2f}$")
 
 
 if __name__ == '__main__':
     res_path = "/home/tvetern/PhD/dl_uncertainty/results/"
     folder_list = get_clean_folders(res_path)
 
-    print("\n\nUsing the saved metrics, for average, majority and first_epoch")
-    calculate_normal_runs(folders=folder_list, result_path=res_path)
+    # print("\n\nUsing the saved metrics, for average, majority and first_epoch")
+    # calculate_normal_runs(folders=folder_list, result_path=res_path)
 
     print("\n\n Calculating metrics both before and after logits, only for average:")
     calculate_metrics_after(folders=folder_list, result_path=res_path)

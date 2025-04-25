@@ -151,7 +151,7 @@ def main():
 
         for run_id, depth in enumerate(depths):
             # Set unique seed per depth
-            model_seed = base_seed + depth
+            model_seed = int(base_seed * 7) + run_id
             set_run_seed(seed=model_seed)
 
             # Get depth specific parameters

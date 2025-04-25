@@ -153,7 +153,7 @@ def main():
         for run_id in range(num_runs):
             mlflow.start_run(run_name=f"{experiment}_run_{str(run_id)}", nested=True)
             
-            set_run_seed(base_seed)
+            set_run_seed(seed=int(base_seed * 5))
             
             run_path = create_run_folder(path=experiment_path, index=str(run_id))
             hyperparameters = {"in_channels": dataset.num_channels,

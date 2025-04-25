@@ -166,7 +166,7 @@ def main():
             # Get train loader for current run
             train_loader = train_loader_list[run_id]
             
-            run_seed = base_seed * run_id + run_id
+            run_seed = int(base_seed * 9) + run_id
             set_run_seed(seed=run_seed)
 
             # Setting depth and cnn units to half of the standard to have simpler base models

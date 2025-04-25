@@ -144,8 +144,8 @@ def main():
         classifiers = []
 
         for run_id in range(num_models):
-            # Ensure different seeds per iteration
-            run_seed = base_seed * run_id
+            # Ensure different seeds per iteration, * 2 is for this ensemble
+            run_seed = int(base_seed * 2) + run_id
             set_run_seed(seed=run_seed)
 
             mlflow.start_run(run_name=f"{experiment}_{str(run_id)}", nested=True)

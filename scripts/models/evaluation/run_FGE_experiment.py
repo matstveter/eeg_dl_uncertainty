@@ -90,11 +90,11 @@ def main():
     # FGE parameters
     #########################################################################################################
     # FGE Parameters
-    fge_start_epoch: int = 70
-    fge_num_models: int = 20
-    fge_epochs_per_cycle: int = 25
-    fge_cycle_start_lr: float = 0.01
-    fge_cycle_end_lr: float = fge_cycle_start_lr / 100
+    fge_start_epoch: int = 20
+    fge_num_models: int = 60
+    fge_epochs_per_cycle: int = 12
+    fge_cycle_start_lr: float = 0.05
+    fge_cycle_end_lr: float = 0.0001
 
     #########################################################################################################
 
@@ -158,7 +158,7 @@ def main():
 
         for run_id in range(num_runs):
 
-            set_run_seed(seed=base_seed)
+            set_run_seed(seed=int(base_seed * 6))
 
             mlflow.start_run(run_name=f"{experiment}_run_{str(run_id)}", nested=True)
             run_path = create_run_folder(path=experiment_path, index=str(run_id))
@@ -224,25 +224,9 @@ def main():
             finally:
                 mlflow.end_run()
 
-            ensemble_5_path, ensemble_20_path = create_ensemble_directory(run_path=experiment_path)
-            
-            run_ensemble_experiment(classifiers=classifiers[0:5],
-                                    device=device,
-                                    experiment_path=ensemble_5_path,
-                                    dataset=dataset,
-                                    dataset_version=dataset_version,
-                                    num_seconds=num_seconds,
-                                    age_scaling=age_scaling,
-                                    batch_size=batch_size,
-                                    criterion=criterion,
-                                    test_subjects=test_subjects,
-                                    val_loader=val_loader,
-                                    test_loader=test_loader,
-                                    save_name="ensemble_test_results_5")
-
             run_ensemble_experiment(classifiers=classifiers,
                                     device=device,
-                                    experiment_path=ensemble_20_path,
+                                    experiment_path=experiment_path,
                                     dataset=dataset,
                                     dataset_version=dataset_version,
                                     num_seconds=num_seconds,
@@ -252,7 +236,7 @@ def main():
                                     test_subjects=test_subjects,
                                     val_loader=val_loader,
                                     test_loader=test_loader,
-                                    save_name="ensemble_test_results_20")
+                                    save_name="ensemble_test_results")
 
 
 if __name__ == "__main__":

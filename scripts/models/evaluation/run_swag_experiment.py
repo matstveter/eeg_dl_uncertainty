@@ -91,9 +91,9 @@ def main():
     # SWAG parameters
     #########################################################################################################
     swag_freq = 10
-    swag_lr = 0.1
-    swag_num_models = 20
-    swag_start = 50
+    swag_lr = 0.01
+    swag_num_models = 73
+    swag_start = 20
     #########################################################################################################
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -155,7 +155,7 @@ def main():
 
         for run_id in range(num_runs):
 
-            set_run_seed(base_seed)
+            set_run_seed(seed=int(base_seed * 3))
 
             # Setup MLFLOW run
             mlflow.start_run(run_name=f"{experiment}_run_{str(run_id)}", nested=True)

@@ -1,5 +1,7 @@
 import os.path
 
+import numpy as np
+
 from scripts.plots.utils import calculate_confidence_interval, get_clean_folders, get_folders_based_on_name, \
     get_remaining_folders_without_name, read_pkl_to_dict
 
@@ -7,80 +9,73 @@ from scripts.plots.utils import calculate_confidence_interval, get_clean_folders
 def calculate_ensemble_metrics(result_path, folder_lists, ensemble_name):
     ensemble_folders = get_folders_based_on_name(folder_lists, ensemble_name)
 
-    results_of_interest = 'average'
+    results_of_interest = 'average_epochs_merge_softmax'
 
     extension = "ensemble_test_results.pkl"
-    special_cases = ['FGE', 'SNAPSHOT']
 
-    if ensemble_name in special_cases:
-        ext_1 = ["ensemble_5", "ensemble_20"]
+    brier_list = []
+    auc_list = []
+    acc_list = []
+    precision_list = []
+    recall_list = []
+    auc_class_0_list = []
+    auc_class_1_list = []
+    auc_class_2_list = []
 
-        ensemble_metrics_auc = {}
-        ensemble_metrics_acc = {}
+    for ensemble_folder in ensemble_folders:
+        ensemble_path = os.path.join(result_path, ensemble_folder, extension)
+        data_dict = read_pkl_to_dict(ensemble_path)
 
-        ensemble_brier = {}
+        data = data_dict[results_of_interest]
 
-        for ensemble_folder in ensemble_folders:
-            for ext in ext_1:
-                ensemble_path = os.path.join(result_path, ensemble_folder, ext, extension)
-                data_dict = read_pkl_to_dict(ensemble_path)
+        auc = data['performance']['auc']
+        acc = data['performance']['accuracy']
+        precision = data['performance']['precision']
+        recall = data['performance']['recall']
+        brier = data['uncertainty']['brier']
 
-                for key, val in data_dict.items():
-                    if results_of_interest in key:
-                        if key not in ensemble_metrics_auc:
-                            ensemble_metrics_auc[key] = []
-                            ensemble_metrics_acc[key] = []
-                            ensemble_brier[key] = []
+        auc_class_0 = data['performance']['auc_class_0']
+        auc_class_1 = data['performance']['auc_class_1']
+        auc_class_2 = data['performance']['auc_class_2']
 
-                        ensemble_metrics_auc[key].append(val['performance']['auc'])
-                        ensemble_metrics_acc[key].append(val['performance']['accuracy'])
-                        ensemble_brier[key].append(val['uncertainty']['brier'])
-    else:
-        ensemble_metrics_auc = {}
-        ensemble_metrics_acc = {}
-        
-        ensemble_brier = {}
+        brier_list.append(brier)
+        auc_list.append(auc)
+        acc_list.append(acc)
+        precision_list.append(precision)
+        recall_list.append(recall)
+        auc_class_0_list.append(auc_class_0)
+        auc_class_1_list.append(auc_class_1)
+        auc_class_2_list.append(auc_class_2)
 
-        for ensemble_folder in ensemble_folders:
-            ensemble_path = os.path.join(result_path, ensemble_folder, extension)
-            data_dict = read_pkl_to_dict(ensemble_path)
+    all_metrics = {'brier': np.array(brier_list),
+                   'auc': np.array(auc_list),
+                   'acc': np.array(acc_list),
+                   'precision': np.array(precision_list),
+                   'recall': np.array(recall_list),
+                   'auc_class_0': np.array(auc_class_0_list),
+                   'auc_class_1': np.array(auc_class_1_list),
+                   'auc_class_2': np.array(auc_class_2_list)}
 
-            for key, val in data_dict.items():
-
-                if results_of_interest in key:
-                    if key not in ensemble_metrics_auc:
-                        ensemble_metrics_auc[key] = []
-                        ensemble_metrics_acc[key] = []
-                        ensemble_brier[key] = []
-
-                    ensemble_metrics_auc[key].append(val['performance']['auc'])
-                    ensemble_metrics_acc[key].append(val['performance']['accuracy'])
-                    
-                    ensemble_brier[key].append(val['uncertainty']['brier'])
-
-    print("\n ----------------- AUC ----------------- ")
-    for key, val in ensemble_metrics_auc.items():
-        print(f"Key: {key}")
+    for key, val in all_metrics.items():
         mean, conf_interval = calculate_confidence_interval(metric_list=val)
-        print(f"Confidence interval: {mean} +/- {conf_interval}")
-
-    print("\n ----------------- Accuracy ----------------- ")
-    for key, val in ensemble_metrics_acc.items():
-        print(f"Key: {key}")
-        mean, conf_interval = calculate_confidence_interval(metric_list=val)
-        print(f"Confidence interval: {mean} +/- {conf_interval}")
-    
-    print("\n ----------------- Brier ----------------- ")
-    for key, val in ensemble_brier.items():
-        print(f"Key: {key}")
-        mean, conf_interval = calculate_confidence_interval(metric_list=val)
-        print(f"Confidence interval: {mean} +/- {conf_interval}")
+        if key == "acc":
+            mean *= 100
+            conf_interval *= 100
+        print(f"{key.upper()}: {mean:.2f} +/- {conf_interval:.2f}")
 
 
 if __name__ == '__main__':
-    res_path = "/home/tvetern/PhD/dl_uncertainty/results/old_exp/new/"
-    ensemble_to_calculate = "WEIGHT"
+    res_path = "/home/tvetern/PhD/dl_uncertainty/results/3/"
+    ensemble_to_calculate = ["WEIGHT", "MCDROPOUT", "AUGMENTATION", "DEPTH", "BAGGING", "FGE", "SNAPSHOT", "SWAG"]
+    # ensemble_to_calculate = ["SNAPSHOT", "FGE", "SWAG"]
+    ensemble_to_calculate = ["SWAG"]
 
-    folder_list = get_clean_folders(res_path)
-    folder_list = get_remaining_folders_without_name(folder_list=folder_list, name="NORMAL")
-    calculate_ensemble_metrics(result_path=res_path, folder_lists=folder_list, ensemble_name=ensemble_to_calculate)
+    print("========================================")
+    for ens in ensemble_to_calculate:
+        print(f"Ensemble: {ens}")
+        print("========================================")
+        folder_list = get_clean_folders(res_path=res_path)
+        folder_list = get_remaining_folders_without_name(folder_list=folder_list, name="NORMAL")
+        calculate_ensemble_metrics(result_path=res_path, folder_lists=folder_list, ensemble_name=ens)
+        print("\n")
+        print("========================================")

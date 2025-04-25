@@ -648,30 +648,19 @@ class SWAGClassifier(MainClassifier):
             if epoch == swag_start:
                 print("Changing optimizer to SGD for SWAG training")
                 optimizer = torch.optim.SGD(self.classifier.parameters(), lr=swag_lr,
-                                            weight_decay=1e-4)
+                                            weight_decay=1e-4, momentum=0.9)
 
             if epoch >= swag_start and (epoch - swag_start) % swag_freq == 0:
                 print("Collecting model for SWAG")
                 self.swag_model.collect_model(self.classifier)
 
-        print("Testing the SWAG model")
+        print("Finalizing SWAG model")
         # path = os.path.join(self._model_path, f"{self._name}_last_model")
-        self.swag_model.sample(0.0)
+        self.swag_model.sample(1.0)
         bn_update(train_loader, self.swag_model, device=device)
         # self.swag_model.save(path=path)
         self.save_hyperparameters()
         self.eval()
-        with torch.no_grad():
-            for inputs, targets in val_loader:
-                inputs, targets = inputs.to(device), targets.to(device)
-                outputs = self.swag_model(inputs)
-
-                val_loss = loss_fn(outputs, targets)
-
-                # Activation function and store values
-                y_pred = self.activation_function(logits=outputs)
-                val_history.batch_stats(y_pred=y_pred, y_true=targets, loss=val_loss)
-            val_history.on_epoch_end()
 
     def forward_ensemble(self, x: torch.Tensor, num_sampling=50):
         self.eval()  # Ensure the model is in evaluation mode

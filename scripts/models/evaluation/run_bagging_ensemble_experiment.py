@@ -128,7 +128,7 @@ def main():
 
     train_loader_list = []
     for i in range(num_bagging_ensembles):
-        bag_seed = base_seed * i
+        bag_seed = (base_seed * 8) + i
         set_run_seed(seed=bag_seed)
         subsample = random.sample(train_subjects, int(bagging_size * len(train_subjects)))
         train_gen = CauDataGenerator(subjects=subsample, dataset=dataset, device=device, split="train",
@@ -154,7 +154,7 @@ def main():
             train_loader = train_loader_list[run_id]
 
             # Introduce a seed for model-specifics
-            model_seed = base_seed + run_id
+            model_seed = int(base_seed * 8) + run_id
             set_run_seed(seed=model_seed)
 
             # Setting depth and cnn units to half of the standard to have simpler base models

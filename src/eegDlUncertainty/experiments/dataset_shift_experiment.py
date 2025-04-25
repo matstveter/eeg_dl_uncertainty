@@ -13,6 +13,9 @@ def evaluate_shift(shift_type, ensemble_class, test_subjects, dataset, use_age, 
 
     if shift_type == "baseline":
         shift_intensity = [0.0]
+    elif shift_type in ["circular_shift", "phase_shift", "amplitude_change", "gaussian",
+                        "baseline_drift", "timewarp", "alpha_peak_shift"]:
+        shift_intensity = [1.0]
     else:
         shift_intensity = [0.1, 0.25, 0.5, 0.75, 0.9, 1.0]
 
