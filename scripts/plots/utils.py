@@ -100,8 +100,8 @@ def get_clean_folders(res_path):
     A list of the folder names remaining after removing the non-result folders
 
     """
-    non_result_folders = ['best', 'data', 'mlflow', 'Old', 'old_optuna', '.trash', 'unfinished_exp', '1', '2', '3',
-                          'backup', 'old_exp']
+    non_result_folders = ['best', 'data', 'mlflow', 'Old', 'old_optuna', '.trash', 'unfinished_exp', '1', '2', '3','3_orginal',
+                          'backup', 'old_exp', 'actual_results_fge_and_snapshot', 'results']
 
     folders = os.listdir(res_path)
     for folder in non_result_folders:
@@ -230,6 +230,7 @@ def read_all_dataset_shifts(path, model_key):
 
     """
     dataset_paths = ['dataset_shifts', 'dataset_shifts_without_age']
+    dataset_paths = ['dataset_shifts']
 
     df_rows = []
 
@@ -254,7 +255,7 @@ def read_all_dataset_shifts(path, model_key):
             shift_t = shift.split("_")[0]
 
             if shift_t == "baseline.pkl":
-                res_dict = data_dict[0.0]['average_epochs_merge_softmax']
+                res_dict = data_dict[0.0]['average_epochs_merge_logits']
                 t_d = get_shift_metrics(res_dict)
                 t_d["shift_name"] = f"baseline{ext}"
                 t_d["shift_intensity"] = 0.0
@@ -446,7 +447,7 @@ def create_ood_df(data_dict, ensemble_method="average_epochs_merge_softmax", get
                 'max_prob': np.max(pred["final_subject_probabilities"], axis=1),
                 'correct': np.argmax(pred["final_subject_probabilities"], axis=1) == np.argmax(
                     pred["subject_one_hot_labels"], axis=1).astype(int),
-                'dataset': datasets
+                'dataset': datasets,
             }
 
             # Calculate accuracy per class
@@ -454,6 +455,12 @@ def create_ood_df(data_dict, ensemble_method="average_epochs_merge_softmax", get
             y_pred = pred['final_subject_class_predictions']
 
             unique_classes = np.unique(y_true)
+
+            if len(unique_classes) > 1:
+                brier_per_class = dataset_results[ensemble_method]['class_uncertainty']['brier']
+                for key, val in brier_per_class.items():
+                    row[f"brier_class_{key}"] = val
+
             accuracy_per_class = {}
 
             for cls in unique_classes:
@@ -483,10 +490,6 @@ def create_ood_df(data_dict, ensemble_method="average_epochs_merge_softmax", get
                 )
                 for idx, auc_score in enumerate(auc_per_class):
                     row[f"auc_class_{idx}"] = auc_score
-
-                # Calculate Brier score per class
-                # brier_score = np.sum((pred["final_subject_probabilities"] - pred["subject_one_hot_labels"]) ** 2, axis=1)
-                # print(brier_score)
 
             df_rows.append(row)
 
@@ -536,6 +539,10 @@ def combine_ood_with_test_results(ood_df, test_dict, ensemble_method="average_ep
             pred["subject_one_hot_labels"], axis=1).astype(int),
         'dataset': "test",
     }
+
+    # Calculate brier score per class
+    for key, val in brier_per_class.items():
+        row[f"brier_class_{key}"] = val
 
     # Calculate accuracy for class 0 and 2
     y_true = pred["subject_class_labels"]
@@ -604,6 +611,7 @@ def calculate_ood_metrics(df, ensemble_type,
                 # print(f"Warning: NaN values found in {metric} for dataset {d}")
                 continue
 
+            # print(values)
             mean, ci = calculate_confidence_interval(values)
             print(f"Metric: {metric:<20} -> Mean: ${mean:.2f}\pm{ci:.2f}$")
 

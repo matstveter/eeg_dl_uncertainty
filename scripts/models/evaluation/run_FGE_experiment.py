@@ -90,11 +90,22 @@ def main():
     # FGE parameters
     #########################################################################################################
     # FGE Parameters
-    fge_start_epoch: int = 20
-    fge_num_models: int = 60
-    fge_epochs_per_cycle: int = 12
-    fge_cycle_start_lr: float = 0.05
-    fge_cycle_end_lr: float = 0.0001
+    # fge_start_epoch: int = 20
+    # fge_num_models: int = 60
+    # fge_epochs_per_cycle: int = 12
+    # fge_cycle_start_lr: float = 0.05
+    # fge_cycle_end_lr: float = 0.0001
+    # fge_start_epoch: int = 70
+    # fge_num_models: int = 20
+    # fge_epochs_per_cycle: int = 10
+    # fge_cycle_start_lr: float = 0.05
+    # fge_cycle_end_lr: float = 0.0005
+
+    fge_start_epoch = 60 # pre‑training
+    fge_epochs_per_cycle = 12  # half‑cycle
+    fge_num_models = 35  # snapshots
+    fge_cycle_start_lr = 0.03  # try 0.03 with SGD,
+    fge_cycle_end_lr = 0.0003
 
     #########################################################################################################
 

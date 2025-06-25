@@ -24,6 +24,10 @@ def calculate_ensemble_metrics(result_path, folder_lists, ensemble_name):
 
     for ensemble_folder in ensemble_folders:
         ensemble_path = os.path.join(result_path, ensemble_folder, extension)
+
+        if not os.path.exists(ensemble_path):
+            print(f"Ensemble path {ensemble_path} does not exist. Skipping.")
+            continue
         data_dict = read_pkl_to_dict(ensemble_path)
 
         data = data_dict[results_of_interest]
@@ -67,8 +71,9 @@ def calculate_ensemble_metrics(result_path, folder_lists, ensemble_name):
 if __name__ == '__main__':
     res_path = "/home/tvetern/PhD/dl_uncertainty/results/3/"
     ensemble_to_calculate = ["WEIGHT", "MCDROPOUT", "AUGMENTATION", "DEPTH", "BAGGING", "FGE", "SNAPSHOT", "SWAG"]
-    # ensemble_to_calculate = ["SNAPSHOT", "FGE", "SWAG"]
-    ensemble_to_calculate = ["SWAG"]
+    ensemble_to_calculate = ["SNAPSHOT", "FGE", "SWAG"]
+    # ensemble_to_calculate = ["FGE", "SNAPSHOT"]
+    ensemble_to_calculate = ['DEEP_AUG']
 
     print("========================================")
     for ens in ensemble_to_calculate:

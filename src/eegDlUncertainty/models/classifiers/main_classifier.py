@@ -1,7 +1,6 @@
 import abc
 import json
 import os.path
-from collections import defaultdict
 from typing import Optional
 
 import mlflow
@@ -12,7 +11,6 @@ from torch.nn.modules.loss import _Loss
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 
-from eegDlUncertainty.data.data_generators.CauDataGenerator import CauDataGenerator
 from eegDlUncertainty.data.results.history import History, TestHistory
 from eegDlUncertainty.models.classifiers.inceptionTime import InceptionNetwork
 from eegDlUncertainty.models.classifiers.swag import SWAG, bn_update
@@ -45,6 +43,10 @@ class MainClassifier(abc.ABC, nn.Module):
                 os.makedirs(self._model_path, exist_ok=True)
 
             self._learning_rate = kwargs.get("learning_rate")
+
+        # Count number of parameters
+        num_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        print(f"Number of parameters in the model: {num_params}")
 
     @property
     def hyperparameters(self):
@@ -230,10 +232,6 @@ class MainClassifier(abc.ABC, nn.Module):
                 test_hist.batch_stats(y_pred=outputs, y_true=target, loss=loss, subject_keys=subject_keys)
 
             test_hist.on_epoch_end(plot=True)
-
-
-
-
 
         # with torch.no_grad():
         #     self.eval()
@@ -431,6 +429,66 @@ class MCClassifier(MainClassifier):
         return torch.stack(logits)
 
 
+# This class were used for the experiments in the paper
+# class SnapshotClassifier(MainClassifier):
+#     def fit_model(self, *, train_loader: DataLoader, val_loader: DataLoader, training_epochs: int,
+#                   device: torch.device, loss_fn: _Loss, train_hist: History, val_history: History,
+#                   earlystopping_patience: int, **kwargs):
+#         start_lr = kwargs.pop("start_lr")
+#         num_cycles = kwargs.pop("num_cycles")
+#         epochs_per_cycle = kwargs.pop("epochs_per_cycle")
+#
+#         optimizer = torch.optim.Adam(self.classifier.parameters(), lr=start_lr)
+#         self.to(device)
+#         model_weight_paths = []
+#         for cycle in range(num_cycles):
+#             # Manually reset the learning rate for the optimizer without resetting its state
+#             for param_group in optimizer.param_groups:
+#                 param_group['lr'] = start_lr
+#
+#             scheduler = CosineAnnealingLR(optimizer, T_max=epochs_per_cycle, eta_min=0.000001)
+#
+#             print(f"Cycle {cycle + 1}/{num_cycles}")
+#             self.train()
+#             for epoch in range(epochs_per_cycle):
+#                 for data, targets in train_loader:
+#                     inputs, targets = data.to(device), targets.to(device)
+#                     optimizer.zero_grad()
+#                     outputs = self(inputs)
+#                     loss = loss_fn(outputs, targets)
+#
+#                     y_pred = self.activation_function(logits=outputs)
+#                     train_hist.batch_stats(y_pred=y_pred, y_true=targets, loss=loss)
+#
+#                     loss.backward()
+#                     optimizer.step()
+#
+#                 train_hist.on_epoch_end()
+#                 scheduler.step()
+#                 print(f"\n--- CYCLE: {cycle + 1} / {num_cycles} EPOCH {epoch + 1} / {epochs_per_cycle} --- LR: "
+#                       f"{scheduler.get_last_lr()[0]}")
+#
+#                 self.eval()
+#                 with torch.no_grad():
+#                     for inputs, targets in val_loader:
+#                         inputs, targets = inputs.to(device), targets.to(device)
+#                         outputs = self(inputs)
+#
+#                         val_loss = loss_fn(outputs, targets)
+#
+#                         # Activation function and store values
+#                         y_pred = self.activation_function(logits=outputs)
+#                         val_history.batch_stats(y_pred=y_pred, y_true=targets, loss=val_loss)
+#                     val_history.on_epoch_end()
+#
+#             path = os.path.join(self._model_path, f"snapshot_{cycle}_model")
+#             self.classifier.save(path=path)
+#             model_weight_paths.append(path)
+#
+#         return model_weight_paths
+
+
+# Implementation closer to the original paper, to see if that improves results
 class SnapshotClassifier(MainClassifier):
     def fit_model(self, *, train_loader: DataLoader, val_loader: DataLoader, training_epochs: int,
                   device: torch.device, loss_fn: _Loss, train_hist: History, val_history: History,
@@ -439,15 +497,31 @@ class SnapshotClassifier(MainClassifier):
         num_cycles = kwargs.pop("num_cycles")
         epochs_per_cycle = kwargs.pop("epochs_per_cycle")
 
-        optimizer = torch.optim.Adam(self.classifier.parameters(), lr=start_lr)
+        steps_per_epoch = len(train_loader)  # batches per epoch
+        steps_per_cycle = epochs_per_cycle * steps_per_epoch
+
+        # optimizer = torch.optim.Adam(self.classifier.parameters(), lr=start_lr)
+
         self.to(device)
         model_weight_paths = []
         for cycle in range(num_cycles):
-            # Manually reset the learning rate for the optimizer without resetting its state
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = start_lr
+            # # Manually reset the learning rate for the optimizer without resetting its state
+            # for param_group in optimizer.param_groups:
+            #     param_group['lr'] = start_lr
 
-            scheduler = CosineAnnealingLR(optimizer, T_max=epochs_per_cycle, eta_min=0.000001)
+            # fresh optimizer each cycle so that momentum buffers do not leak
+            optimizer = torch.optim.SGD(
+                self.classifier.parameters(), lr=start_lr, momentum=0.9, weight_decay=1e-4
+            )
+
+            # scheduler = CosineAnnealingLR(optimizer, T_max=epochs_per_cycle, eta_min=eta_min)
+            # Warm restarts in iteration space (step every batch)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+                optimizer,
+                T_0=steps_per_cycle,
+                T_mult=1,
+                eta_min=start_lr / 1000,
+            )
 
             print(f"Cycle {cycle + 1}/{num_cycles}")
             self.train()
@@ -463,9 +537,9 @@ class SnapshotClassifier(MainClassifier):
 
                     loss.backward()
                     optimizer.step()
+                    scheduler.step()
 
                 train_hist.on_epoch_end()
-                scheduler.step()
                 print(f"\n--- CYCLE: {cycle + 1} / {num_cycles} EPOCH {epoch + 1} / {epochs_per_cycle} --- LR: "
                       f"{scheduler.get_last_lr()[0]}")
 
@@ -489,6 +563,106 @@ class SnapshotClassifier(MainClassifier):
         return model_weight_paths
 
 
+# This class were used for the experiments in the paper
+# class FGEClassifier(MainClassifier):
+#
+#     @staticmethod
+#     def cyclic_learning_rate(epoch, cycle, alpha_1, alpha_2):
+#         t = (epoch % cycle) / cycle
+#         if t < 0.5:
+#             return alpha_1 * (1.0 - 2.0 * t) + alpha_2 * 2.0 * t
+#         else:
+#             return alpha_1 * (2.0 * t - 1.0) + alpha_2 * (2.0 - 2.0 * t)
+#
+#     def fit_model(self, *, train_loader: DataLoader, val_loader: DataLoader, training_epochs: int,
+#                   device: torch.device, loss_fn: _Loss, train_hist: object, val_history: object,
+#                   earlystopping_patience: int, **kwargs):
+#
+#         pretrain_epochs = kwargs.pop("fge_start_epoch")
+#         epochs_per_cycle = kwargs.pop("fge_epochs_per_cycle")
+#         cycle_start_lr = kwargs.pop("fge_cycle_start_lr")
+#         cycle_end_lr = kwargs.pop("fge_cycle_end_lr")
+#         num_models = kwargs.pop("fge_num_models")
+#
+#         num_epochs = pretrain_epochs + (epochs_per_cycle * num_models)
+#         optimizer = torch.optim.Adam(self.classifier.parameters(), lr=self._learning_rate)
+#         self.to(device)
+#         model_weight_paths = []
+#
+#         # Pretraining Phase
+#         for epoch in range(pretrain_epochs):
+#             print(f"\n--- PRETRAIN EPOCH {epoch + 1} / {pretrain_epochs} ---")
+#             self.train()
+#             for data, targets in train_loader:
+#                 inputs, targets = data.to(device), targets.to(device)
+#                 optimizer.zero_grad()
+#                 outputs = self(inputs)
+#                 loss = loss_fn(outputs, targets)
+#
+#                 y_pred = self.activation_function(logits=outputs)
+#                 train_hist.batch_stats(y_pred=y_pred, y_true=targets, loss=loss)
+#
+#                 loss.backward()
+#                 optimizer.step()
+#
+#             train_hist.on_epoch_end()
+#
+#             self.eval()
+#             with torch.no_grad():
+#                 for inputs, targets in val_loader:
+#                     inputs, targets = inputs.to(device), targets.to(device)
+#                     outputs = self(inputs)
+#
+#                     val_loss = loss_fn(outputs, targets)
+#
+#                     y_pred = self.activation_function(logits=outputs)
+#                     val_history.batch_stats(y_pred=y_pred, y_true=targets, loss=val_loss)
+#                 val_history.on_epoch_end()
+#
+#         # Fast-Geometric Ensemble Phase
+#         for epoch in range(pretrain_epochs, num_epochs):
+#             lr = self.cyclic_learning_rate(epoch=epoch - pretrain_epochs, cycle=epochs_per_cycle,
+#                                            alpha_1=cycle_start_lr, alpha_2=cycle_end_lr)
+#             for param_group in optimizer.param_groups:
+#                 param_group['lr'] = lr
+#             print(f"\n--- EPOCH {epoch + 1} / {num_epochs} --- LR: {lr}")
+#             self.train()
+#             for data, targets in train_loader:
+#                 inputs, targets = data.to(device), targets.to(device)
+#                 optimizer.zero_grad()
+#                 outputs = self(inputs)
+#                 loss = loss_fn(outputs, targets)
+#
+#                 y_pred = self.activation_function(logits=outputs)
+#                 train_hist.batch_stats(y_pred=y_pred, y_true=targets, loss=loss)
+#
+#                 loss.backward()
+#                 optimizer.step()
+#
+#             train_hist.on_epoch_end()
+#
+#             self.eval()
+#             with torch.no_grad():
+#                 for inputs, targets in val_loader:
+#                     inputs, targets = inputs.to(device), targets.to(device)
+#                     outputs = self(inputs)
+#
+#                     val_loss = loss_fn(outputs, targets)
+#
+#                     y_pred = self.activation_function(logits=outputs)
+#                     val_history.batch_stats(y_pred=y_pred, y_true=targets, loss=val_loss)
+#                 val_history.on_epoch_end()
+#
+#             # At halfway through the cycle, save the model weights
+#             if (epoch - pretrain_epochs) % epochs_per_cycle == epochs_per_cycle // 2:
+#                 path = os.path.join(self._model_path, f"FGE_cycle_{epoch}_model")
+#                 self.classifier.save(path=path)
+#                 model_weight_paths.append(path)
+#                 print("\nModel saved at epoch", epoch + 1, " lr_schedule: ", lr)
+#
+#         return model_weight_paths
+
+# Implementation closer to the original paper, to see if that improves results
 class FGEClassifier(MainClassifier):
 
     @staticmethod
@@ -510,7 +684,16 @@ class FGEClassifier(MainClassifier):
         num_models = kwargs.pop("fge_num_models")
 
         num_epochs = pretrain_epochs + (epochs_per_cycle * num_models)
-        optimizer = torch.optim.Adam(self.classifier.parameters(), lr=self._learning_rate)
+        # optimizer = torch.optim.Adam(self.classifier.parameters(), lr=self._learning_rate)
+
+        # One SGD optimiser for the whole run – momentum continuity is essential
+        optimizer = torch.optim.SGD(
+            self.classifier.parameters(),
+            lr=cycle_start_lr,
+            momentum=0.9,
+            weight_decay=1e-4,
+        )
+
         self.to(device)
         model_weight_paths = []
 
@@ -546,14 +729,39 @@ class FGEClassifier(MainClassifier):
 
         # Fast-Geometric Ensemble Phase
         for epoch in range(pretrain_epochs, num_epochs):
-            lr = self.cyclic_learning_rate(epoch=epoch - pretrain_epochs, cycle=epochs_per_cycle,
-                                           alpha_1=cycle_start_lr, alpha_2=cycle_end_lr)
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = lr
-            print(f"\n--- EPOCH {epoch + 1} / {num_epochs} --- LR: {lr}")
+
+            # At halfway through the cycle, save the model weights
+            if (epoch - pretrain_epochs) % epochs_per_cycle == epochs_per_cycle // 2:
+                path = os.path.join(self._model_path, f"FGE_cycle_{epoch}_model")
+                self.classifier.save(path=path)
+                model_weight_paths.append(path)
+                print("\nModel saved at epoch", epoch + 1, " lr_schedule: ", lr)
+
+            lr_ep = self.cyclic_learning_rate(
+                epoch=epoch - pretrain_epochs,
+                cycle=epochs_per_cycle,
+                alpha_1=cycle_start_lr,
+                alpha_2=cycle_end_lr,
+            )
+            for pg in optimizer.param_groups:
+                pg["lr"] = lr_ep
+            print(f"\n--- EPOCH {epoch + 1}/{num_epochs} --- LR(start) {lr_ep:.6f}")
+            num_iters = len(train_loader)  # batches in this epoch
             self.train()
-            for data, targets in train_loader:
-                inputs, targets = data.to(device), targets.to(device)
+
+            for batch_idx, (data, target) in enumerate(train_loader):
+                frac = batch_idx / num_iters
+                lr = self.cyclic_learning_rate(
+                    epoch=(epoch - pretrain_epochs) + frac,  # epoch + fraction
+                    cycle=epochs_per_cycle,
+                    alpha_1=cycle_start_lr,
+                    alpha_2=cycle_end_lr,
+                )
+                for pg in optimizer.param_groups:
+                    pg["lr"] = lr
+
+                inputs, targets = data.to(device), target.to(device)
+
                 optimizer.zero_grad()
                 outputs = self(inputs)
                 loss = loss_fn(outputs, targets)
@@ -578,16 +786,100 @@ class FGEClassifier(MainClassifier):
                     val_history.batch_stats(y_pred=y_pred, y_true=targets, loss=val_loss)
                 val_history.on_epoch_end()
 
-            # At halfway through the cycle, save the model weights
-            if (epoch - pretrain_epochs) % epochs_per_cycle == epochs_per_cycle // 2:
-                path = os.path.join(self._model_path, f"FGE_cycle_{epoch}_model")
-                self.classifier.save(path=path)
-                model_weight_paths.append(path)
-                print("\nModel saved at epoch", epoch + 1, " lr_schedule: ", lr)
-
         return model_weight_paths
 
 
+# This class were used for the experiments in the paper
+# class SWAGClassifier(MainClassifier):
+#
+#     def __init__(self, model_name, pretrained: Optional[str] = None, **kwargs):
+#         model_kwargs = kwargs.copy()
+#         model_kwargs['classifier_name'] = model_name
+#         super().__init__(model_name=model_name, pretrained=pretrained, **kwargs)
+#         self.swag_model = SWAG(base=InceptionNetwork, max_num_models=kwargs.pop("swag_num_models"),
+#                                no_cov_mat=False, **model_kwargs)
+#
+#     def fit_model(self, *, train_loader: DataLoader, val_loader: DataLoader, training_epochs: int,
+#                   device: torch.device, loss_fn: _Loss, train_hist: History, val_history: History,
+#                   earlystopping_patience: int, **kwargs):
+#
+#         optimizer = torch.optim.Adam(self.classifier.parameters(), lr=self._learning_rate)
+#         self.to(device)
+#
+#         swag_start = kwargs.get("swag_start")
+#         swag_freq = kwargs.get("swag_freq")
+#         swag_lr = kwargs.get("swag_lr")
+#         swag_num_models = kwargs.get("swag_num_models")
+#
+#         num_epochs = swag_start + (swag_freq * swag_num_models)
+#
+#         for epoch in range(num_epochs):
+#
+#             print(f"\n-------------------------  EPOCH {epoch + 1} / {num_epochs}  -------------------------")
+#             self.train()
+#
+#             for data, targets in train_loader:
+#                 inputs, targets = data.to(device), targets.to(device)
+#
+#                 optimizer.zero_grad()
+#                 outputs = self(inputs)
+#                 loss = loss_fn(outputs, targets)
+#                 # Store values in the history object
+#                 y_pred = self.activation_function(logits=outputs)
+#                 train_hist.batch_stats(y_pred=y_pred, y_true=targets, loss=loss)
+#
+#                 loss.backward()
+#                 optimizer.step()
+#
+#             train_hist.on_epoch_end()
+#
+#             self.eval()
+#             with torch.no_grad():
+#                 for inputs, targets in val_loader:
+#                     inputs, targets = inputs.to(device), targets.to(device)
+#                     outputs = self(inputs)
+#
+#                     val_loss = loss_fn(outputs, targets)
+#
+#                     # Activation function and store values
+#                     y_pred = self.activation_function(logits=outputs)
+#                     val_history.batch_stats(y_pred=y_pred, y_true=targets, loss=val_loss)
+#                 val_history.on_epoch_end()
+#
+#             # Change to a SGD optimizer with a different learning rate for SWAG training
+#             if epoch == swag_start:
+#                 print("Changing optimizer to SGD for SWAG training")
+#                 optimizer = torch.optim.SGD(self.classifier.parameters(), lr=swag_lr,
+#                                             weight_decay=1e-4, momentum=0.9)
+#
+#             if epoch >= swag_start and (epoch - swag_start) % swag_freq == 0:
+#                 print("Collecting model for SWAG")
+#                 self.swag_model.collect_model(self.classifier)
+#
+#         print("Finalizing SWAG model")
+#         # path = os.path.join(self._model_path, f"{self._name}_last_model")
+#         self.swag_model.sample(1.0)
+#         bn_update(train_loader, self.swag_model, device=device)
+#         # self.swag_model.save(path=path)
+#         self.save_hyperparameters()
+#         self.eval()
+#
+#     def forward_ensemble(self, x: torch.Tensor, num_sampling=50):
+#         self.eval()  # Ensure the model is in evaluation mode
+#         logits = []
+#
+#         with torch.no_grad():  # Disable gradient calculation
+#             for _ in range(num_sampling):
+#                 self.swag_model.sample()  # Sample from the SWAG model
+#                 logits.append(self.swag_model(x))  # Append the logits to the list
+#         return torch.stack(logits)  # Stack the logits into a single tensor
+#
+#     def save_swag_model(self):
+#         # todo This function need to save swag with all parameters
+#         pass
+
+
+# Implementation closer to the original paper, to see if that improves results
 class SWAGClassifier(MainClassifier):
 
     def __init__(self, model_name, pretrained: Optional[str] = None, **kwargs):
@@ -610,6 +902,7 @@ class SWAGClassifier(MainClassifier):
         swag_num_models = kwargs.get("swag_num_models")
 
         num_epochs = swag_start + (swag_freq * swag_num_models)
+        swag_scheduler = None
 
         for epoch in range(num_epochs):
 
@@ -631,6 +924,9 @@ class SWAGClassifier(MainClassifier):
 
             train_hist.on_epoch_end()
 
+            if swag_scheduler is not None:
+                swag_scheduler.step()
+
             self.eval()
             with torch.no_grad():
                 for inputs, targets in val_loader:
@@ -649,8 +945,11 @@ class SWAGClassifier(MainClassifier):
                 print("Changing optimizer to SGD for SWAG training")
                 optimizer = torch.optim.SGD(self.classifier.parameters(), lr=swag_lr,
                                             weight_decay=1e-4, momentum=0.9)
+                swag_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(  # ▲
+                    optimizer, T_max=swag_freq, eta_min=swag_lr / 10  # ▲
+                )
 
-            if epoch >= swag_start and (epoch - swag_start) % swag_freq == 0:
+            if epoch > swag_start and (epoch - swag_start) % swag_freq == 0:
                 print("Collecting model for SWAG")
                 self.swag_model.collect_model(self.classifier)
 
@@ -678,30 +977,60 @@ class SWAGClassifier(MainClassifier):
 
 
 class DynamicEnsembleClassifier(MainClassifier):
-    def fit_model(self, *, train_loader: DataLoader, val_loader: DataLoader, training_epochs: int,
-                  device: torch.device, loss_fn: _Loss, train_hist: History, val_history: History,
-                  earlystopping_patience: int, **kwargs):
+    """Train with cyclic high‑LR snapshots and guarantee *at least*
+    ``required_num_models`` snapshots for ensembling. Training proceeds for
+    the full ``training_epochs`` budget; more than the minimum number of
+    models may be collected.
 
-        patience = kwargs.pop("patience")
-        lr_rate_search = kwargs.pop("lr_rate_search")
-        num_high_lr_epochs = kwargs.pop("num_high_lr_epochs")
+    Parameters
+    ----------
+    required_num_models : int, default 5
+        Minimum number of snapshots (sub‑models) to keep. The loop no longer
+        stops early when this target is reached; it only ensures the minimum
+        is satisfied by the end of training.
+    patience : int, default ``earlystopping_patience``
+        Validation epochs without improvement before triggering a high‑LR
+        burst.
+    lr_rate_search : float, default ``base_lr * 10``
+        Learning rate used during the burst.
+    num_high_lr_epochs : int, default 3
+        Duration of the burst in epochs.
+    """
+
+    def fit_model(
+            self,
+            *,
+            train_loader: DataLoader,
+            val_loader: DataLoader,
+            training_epochs: int,
+            device: torch.device,
+            loss_fn: _Loss,
+            train_hist: History,
+            val_history: History,
+            earlystopping_patience: int = 10,
+            required_num_models: int = 5,
+            **kwargs,
+    ):
+        # ------------------------------------------------------------------ #
+        patience: int = kwargs.pop("patience", earlystopping_patience)
+        lr_rate_search: float = kwargs.pop("lr_rate_search", self._learning_rate * 10)
+        num_high_lr_epochs: int = kwargs.pop("num_high_lr_epochs", 3)
+        # ------------------------------------------------------------------ #
 
         optimizer = torch.optim.Adam(self.classifier.parameters(), lr=self._learning_rate)
         self.to(device)
+
+        best_loss = float("inf")
         best_path = None
-        model_weight_paths = []
-        no_improvement_epochs = 0
-        best_loss = float('inf')
+        snapshots = []  # committed ensemble members
+        candidates = []  # (path, loss) inside current cycle
 
-        num_models = 0
-        required_num_models = 2
-        potential_models = []
-
-        # Used to keep track of the high learning rate window
-        high_lr_epochs_remaining = 0
+        no_improvement_epochs: int = 0
+        high_lr_epochs_remaining: int = 0
 
         for epoch in range(training_epochs):
-            print(f"\n-------------------------  EPOCH {epoch + 1} / {training_epochs}  -------------------------")
+            print(f"Epoch {epoch + 1} / {training_epochs} (LR={optimizer.param_groups[0]['lr']})")
+
             self.train()
             for data, targets in train_loader:
                 inputs, targets = data.to(device), targets.to(device)
@@ -730,56 +1059,71 @@ class DynamicEnsembleClassifier(MainClassifier):
                     val_history.batch_stats(y_pred=y_pred, y_true=targets, loss=val_loss)
                 val_history.on_epoch_end()
 
-            current_loss = val_history.get_last_loss()
+            current_val_loss = val_history.get_last_loss()
 
-            if current_loss < best_loss:
-                best_loss = current_loss
+            # ------------------------ best‑model logic ---------------------- #
+            if current_val_loss < best_loss:
+                best_loss = current_val_loss
                 no_improvement_epochs = 0
-                best_path = os.path.join(self._model_path, f"{self._name}_model_{epoch}")
+                best_path = os.path.join(self._model_path, f"{self._name}_snapshot_{epoch}")
                 self.classifier.save(path=best_path)
-                potential_models.append([best_path, current_loss])
+                candidates.append((best_path, best_loss))
             else:
                 no_improvement_epochs += 1
 
+            # --------------- plateau detected → high‑LR burst -------------- #
             if no_improvement_epochs >= patience:
-                print("No improvement, changing to high learning rate, ", num_high_lr_epochs)
-                # Save the best model path
-                if best_path is not None:
-                    if best_path not in model_weight_paths:
-                        model_weight_paths.append(best_path)
-                        num_models += 1
-                        # remove the best_path from potential_models
-                        potential_models = [model for model in potential_models if model[0] != best_path]
-                else:
-                    print("No best path found!")
+
+                if not isinstance(optimizer, torch.optim.SGD):
+                    print("Switching to SGD for burst phase")
+                    optimizer = torch.optim.SGD(self.classifier.parameters(),
+                                                lr=lr_rate_search,  # e.g. 0.05
+                                                momentum=0.9,
+                                                weight_decay=1e-4)
+
+                # commit the best snapshot of the cycle
+                if best_path and best_path not in snapshots:
+                    snapshots.append(best_path)
+                    print(f"Snapshot saved: {best_path} (loss={best_loss:.4f})")
+
+                # reset cycle state
                 no_improvement_epochs = 0
-                best_loss = float('inf')
-                self.classifier = self.classifier.load(path=best_path)
-                self.classifier.to(device)
-                high_lr_epochs_remaining = num_high_lr_epochs
+                best_loss = float("inf")
+                candidates.clear()
 
-                # Reset the optimizer to avoid carrying over old states
-                optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr_rate_search)
+                # high‑LR burst
+                for g in optimizer.param_groups:
+                    g["lr"] = lr_rate_search
+                high_lr_epochs_remaining = num_high_lr_epochs + 1  # +1 for bookkeeping
 
-                # Set high learning rate
-                for param_group in optimizer.param_groups:
-                    param_group['lr'] = lr_rate_search
-
+            # --------------- end‑of‑epoch bookkeeping ---------------------- #
             if high_lr_epochs_remaining > 0:
                 high_lr_epochs_remaining -= 1
+                if high_lr_epochs_remaining == 1:
+                    # Do a softer landing
+                    for g in optimizer.param_groups:
+                        g["lr"] = self._learning_rate / 10
+                    print(f"LR softened to {optimizer.param_groups[0]['lr']}")
+
                 if high_lr_epochs_remaining == 0:
-                    # Set learning rate back to original after high learning rate window
-                    for param_group in optimizer.param_groups:
-                        param_group['lr'] = self._learning_rate
-                    print(f"Learning rate reverted to {self._learning_rate}")
+                    for g in optimizer.param_groups:
+                        g["lr"] = self._learning_rate
+                    print(f"LR reverted to base {self._learning_rate}")
+                    optimizer = torch.optim.Adam(self.classifier.parameters(), lr=self._learning_rate)
 
-        if num_models == 0:
-            model_weight_paths.append(best_path)
-            num_models += 1
+        # ----------------------- post‑training checks ---------------------- #
+        # Ensure at least *required_num_models* snapshots are returned.
+        if best_path and best_path not in snapshots:
+            snapshots.append(best_path)
 
-        if num_models < required_num_models:
-            # Select a model from potential models, which have the lowest loss and not yet been selected
-            potential_models.sort(key=lambda x: x[1])
-            model_weight_paths.append(potential_models[0][0])
+        if len(snapshots) < required_num_models and candidates:
+            # fill from uncommitted candidates with lowest loss first
+            candidates.sort(key=lambda t: t[1])
+            for pth, _ in candidates:
+                if pth not in snapshots:
+                    snapshots.append(pth)
+                if len(snapshots) == required_num_models:
+                    break
 
-        return model_weight_paths
+        print(f"Returning {len(snapshots)} snapshot paths (minimum required = {required_num_models})")
+        return snapshots

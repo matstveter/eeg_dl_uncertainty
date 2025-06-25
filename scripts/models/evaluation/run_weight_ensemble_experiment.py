@@ -29,7 +29,7 @@ def set_run_seed(seed):
 
 
 def main():
-    experiment = "FINAL_WEIGHT_ENSEMBLE"
+    experiment = "FINAL_DEEP_AUG_ENSEMBLE"
     print(f"Running experiment: {experiment}")
     #########################################################################################################
     # Get arguments and read config file
@@ -74,6 +74,13 @@ def main():
     augmentations = ['timereverse', 'smoothtimemask', 'signflip']
     other_parameters = {'smoothtimemask': {'mask_len_samples': 20}}
     augmentation_prob = 0.5
+    augmentations = ['timereverse', 'signflip', 'ftsurrogate', 'channelsdropout', 'smoothtimemask']
+    other_parameters = {'timereverse': {},
+                  'signflip': {},
+                  'ftsurrogate': {'phase_noise_magnitude': 0.1, 'channel_indep': True},
+                  'channelsdropout': {'p_drop': 0.3},
+                  'smoothtimemask': {'mask_len_samples': 15}
+                  }
 
     #########################################################################################################
     # Normal parameters
@@ -145,7 +152,7 @@ def main():
 
         for run_id in range(num_models):
             # Ensure different seeds per iteration, * 2 is for this ensemble
-            run_seed = int(base_seed * 2) + run_id
+            run_seed = int(base_seed * 12) + run_id
             set_run_seed(seed=run_seed)
 
             mlflow.start_run(run_name=f"{experiment}_{str(run_id)}", nested=True)

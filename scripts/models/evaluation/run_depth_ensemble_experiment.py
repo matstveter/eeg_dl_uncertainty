@@ -111,7 +111,7 @@ def main():
         train_subjects = train_subjects[0:30]
         val_subjects = val_subjects[0:15]
         test_subjects = val_subjects
-        train_epochs = 5
+        train_epochs = 2
 
     #########################################################################################################
     # Loss function

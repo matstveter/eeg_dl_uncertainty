@@ -152,10 +152,10 @@ def run_ensemble_experiment(*, classifiers, device,
     eval_dataset_shifts(ensemble_class=ens, test_subjects=test_subjects, dataset=dataset,
                         device=device, use_age=True, batch_size=batch_size,
                         save_path=experiment_path)
-    # Evaluate the dataset shifts on the ensemble models, when all subjects ages are set to the same value (mean)
-    eval_dataset_shifts(ensemble_class=ens, test_subjects=test_subjects, dataset=dataset,
-                        device=device, use_age=False, batch_size=batch_size,
-                        save_path=experiment_path)
+    # # Evaluate the dataset shifts on the ensemble models, when all subjects ages are set to the same value (mean)
+    # eval_dataset_shifts(ensemble_class=ens, test_subjects=test_subjects, dataset=dataset,
+    #                     device=device, use_age=False, batch_size=batch_size,
+    #                     save_path=experiment_path)
     # Run the OOD experiment
     ood_exp(ensemble_class=ens, dataset_version=dataset_version,
             num_seconds=num_seconds,

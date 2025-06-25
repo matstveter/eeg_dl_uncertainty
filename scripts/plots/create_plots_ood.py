@@ -79,8 +79,10 @@ def main(result_path, folders):
     master_ood_df = pd.concat(ood_df_all, ignore_index=True)
     ensembles = master_ood_df['ensemble_type'].unique()
 
-    metrics = ['brier_score', 'ece']
-    ensembles = ['WEIGHT']
+    # metrics = ['auc']
+    # ensembles = ['SWAG']
+    metrics = []
+
 
     for ens in ensembles:
         if metrics:

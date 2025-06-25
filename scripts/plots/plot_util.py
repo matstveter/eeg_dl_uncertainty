@@ -6,6 +6,7 @@ import seaborn as sns
 import pandas as pd
 import numpy as np
 from pandas._libs.parsers import CategoricalDtype
+from scipy import stats
 
 from scripts.plots.utils import format_ci, print_df
 
@@ -14,7 +15,7 @@ def set_paper_plot_style():
     sns.set_context("paper", font_scale=1.2)  # "paper" context + scaling
     sns.set_style("darkgrid")  # "darkgrid" style)
 
-    label = 16
+    label = 36
 
     plt.rcParams.update({
         "figure.figsize": (12, 8),
@@ -22,7 +23,7 @@ def set_paper_plot_style():
         "axes.labelsize": label+8,
         "xtick.labelsize": label+8,
         "ytick.labelsize": label+8,
-        "legend.fontsize": label,
+        "legend.fontsize": label+8,
         "lines.linewidth": 4,
         "lines.markersize": 6,
         "savefig.dpi": 300,
@@ -30,7 +31,9 @@ def set_paper_plot_style():
     sns.set_palette("colorblind")
 
 
-def static_plot(df, shift_name, metric, with_age=True, show_conf_interval=True, save_path=None):
+def static_plot(df, shift_name, metric, hue_order, palette,
+                with_age=True, show_conf_interval=True, save_path=None, no_axis=False,
+                no_legend=False):
     df_baseline = df[df["shift_name"] == "baseline"].copy()
 
     if shift_name in ["slow_drift", "peak_shift", "timewarp", "circular_shift"]:
@@ -53,7 +56,7 @@ def static_plot(df, shift_name, metric, with_age=True, show_conf_interval=True, 
 
     if shift_name in ['amplitude', 'gaussian']:
         df_plot["shift_intensity"] = df_plot["shift_intensity"].apply(lambda x: f"{x:.4g}")
-    elif shift_name in ['interpolate', 'channel_rotation']:
+    elif shift_name in ['interpolate', 'rotation']:
         # convert to percentage
         df_plot["shift_intensity"] = df_plot["shift_intensity"].apply(lambda x: f"{x * 100:.4g}")
     elif shift_name in ['phase_shift']:
@@ -91,23 +94,26 @@ def static_plot(df, shift_name, metric, with_age=True, show_conf_interval=True, 
         x="shift_intensity",
         y=metric,
         hue="ensemble_type",
+        hue_order=hue_order,
+        palette=palette,
         errorbar='ci' if show_conf_interval else None,
         err_style='band',
         estimator="mean",
         marker="D"
     )
 
-    plt.title(f"{shift_name.title()} Shift {'' if with_age else 'w/o age'}")
+    # plt.title(f"{shift_name.title()} Shift {'' if with_age else 'w/o age'}")
 
     replace_xtick_zero_with_baseline(valid_values=df_plot["shift_intensity"].unique())
 
     if shift_name == "slow_drift":
         plt.xlabel("Shift intensity (maxDrift_numSinus)")
-    elif shift_name in ["interpolate", "channel_rotation"]:
+    elif shift_name in ["interpolate", "rotation"]:
         plt.xlabel("Shift intensity (% of channels)")
     elif shift_name == "phase_shift":
         plt.xlabel("Shift intensity (radians)")
     elif shift_name == "amplitude":
+        plt.axvline(x=7, linestyle='--', color='gray', linewidth=1)
         plt.xlabel("Shift intensity (factor)")
     elif shift_name == "gaussian":
         plt.xlabel("Shift intensity (σ)")
@@ -122,24 +128,48 @@ def static_plot(df, shift_name, metric, with_age=True, show_conf_interval=True, 
 
     if metric == "auc":
         plt.ylabel("AUC")
+        plt.ylim(0.45, 0.9)
+    elif "auc_class" in metric:
+        plt.ylabel(metric.replace("_", " ").capitalize())
+        plt.ylim(0.45, 0.9)
+    elif metric == "ece":
+        plt.ylabel("ECE")
+        plt.ylim(0.0, 0.55)
+    elif metric == "accuracy":
+        plt.ylabel("Accuracy")
+        plt.ylim(0.25, 0.75)
+    elif metric == "brier":
+        plt.ylabel("Brier score")
+        plt.ylim(0.4, 1.2)
     else:
         plt.ylabel(metric.replace("_", " ").capitalize())
-    plt.legend(loc='upper left' if metric == "brier" or metric == "ece" else 'lower left')
+
+    if no_legend:
+        # Remove the legend
+        plt.legend().remove()
+    else:    
+        plt.legend(loc='upper left' if metric == "brier" or metric == "ece" else 'lower left')
+
+    if no_axis:
+        plt.gca().tick_params(left=False, labelleft=False)
+        plt.ylabel("")
+
     plt.grid(True)
     plt.tight_layout()
     if save_path:
-        shift_path = os.path.join(save_path, shift_name)
-        # Create the directory if it doesn't exist
-        os.makedirs(shift_path, exist_ok=True)
-        save_name = f"{shift_path}/{shift_name}_{metric}.pdf"
-        plt.savefig(save_name, dpi=300, bbox_inches='tight', format="pdf")
+        if no_axis:
+            new_shift_name = f"{shift_name}_no_axis"
+        else:
+            new_shift_name = f"{shift_name}"
+        save_name = f"{save_path}/{new_shift_name}_{metric}.pdf"
+        plt.savefig(save_name, dpi=300, format="pdf", bbox_inches=None, pad_inches=0.1)
     else:
         plt.show()
 
     plt.close()
 
 
-def bandstop_plot(df, metric, with_age=True, save_path=None):
+def bandstop_plot(df, metric, palette, with_age=True, save_path=None, no_legend=False):
     df_baseline = df[df["shift_name"] == "baseline"].copy()
 
     shift_key = "bandstop"
@@ -159,7 +189,12 @@ def bandstop_plot(df, metric, with_age=True, save_path=None):
 
     df_plot = pd.concat([df_baseline, df_shift], ignore_index=True)
 
-    sns.boxplot(
+    # calculate_metrics(df=df_plot, metric=metric)
+    # return
+
+    plt.figure(figsize=(24, 12))
+
+    ax = sns.boxplot(
         data=df_plot,
         x="shift_name",
         y=metric,
@@ -167,34 +202,132 @@ def bandstop_plot(df, metric, with_age=True, save_path=None):
         dodge=True,
         showfliers=False
     )
-    plt.title(f"Bandstop Shift {'' if with_age else 'w/o age'}")
+
+    # get number of unique shifts
+    n = len(df_plot["shift_name"].unique())
+
+    # choose two alternating colors
+    colors = ["#e0e0e0", "#b0b0b0"]
+
+    for i in range(n):
+        ax.axvspan(i - 0.5, i + 0.5,
+                   facecolor=colors[i % 2],
+                   alpha=0.5,
+                   zorder=0)
+
+    sns.boxplot(
+        data=df_plot,
+        x="shift_name",
+        y=metric,
+        hue="ensemble_type",
+        palette=palette,
+        dodge=True,
+        showfliers=False
+    )
+
+    # plt.title(f"Bandstop Shift {'' if with_age else 'w/o age'}")
 
     ax = plt.gca()
     tick_labels_raw = [label.get_text() for label in ax.get_xticklabels()]
     tick_labels_cleaned = [label.replace("bandstop_", "").replace("_without_age", "") for label in tick_labels_raw]
+
+    # Change the baseline tick to test
+    tick_labels_cleaned = ["Test" if label == "baseline" else label for label in tick_labels_cleaned]
+
     ax.set_xticklabels(tick_labels_cleaned, rotation=45, ha='right', rotation_mode="anchor")
     
     if metric == "auc":
         plt.ylabel("AUC")
+        plt.ylim(0.45, 0.9)
     else:
         plt.ylabel(metric.replace("_", " ").capitalize())
 
     plt.xlabel("Frequency band")
+    if no_legend:
+        # Remove the legend
+        plt.legend().remove()
+    else:    
+        plt.legend(loc='upper left' if metric == "brier" or metric == "ece" else 'lower left')
 
-    plt.legend(loc='upper left' if metric == "brier" or metric == "ece" else 'lower left')
     plt.grid(True)
     plt.tight_layout()
     shift_name = "bandstop"
     if save_path:
-        shift_path = os.path.join(save_path, shift_name)
-        # Create the directory if it doesn't exist
-        os.makedirs(shift_path, exist_ok=True)
-        save_name = f"{shift_path}/{shift_name}_{metric}.pdf"
-        plt.savefig(save_name, dpi=300, bbox_inches='tight', format="pdf")
+        save_name = f"{save_path}/{shift_name}_{metric}.pdf"
+        plt.savefig(save_name, dpi=300, format="pdf", bbox_inches=None, pad_inches=0.1)
     else:
         plt.show()
 
     plt.close()
+
+
+def calculate_metrics(df, metric):
+    """Calculate means and confidence intervals for baseline and shift types."""
+    ensemble_types = df["ensemble_type"].unique()
+    results = []
+
+    for ensemble_type in ensemble_types:
+        df_ensemble = df[df["ensemble_type"] == ensemble_type].copy()
+
+        # Calculate for baseline
+        df_baseline = df_ensemble[df_ensemble["shift_name"] == "baseline"]
+        baseline_mean, baseline_ci_lower, baseline_ci_upper = calculate_confidence_intervals(df_baseline[metric])
+
+        # Store baseline results
+        results.append({
+            'ensemble_type': ensemble_type,
+            'shift_name': 'baseline',
+            'mean': baseline_mean,
+            'ci_lower': baseline_ci_lower,
+            'ci_upper': baseline_ci_upper
+        })
+
+        # Unique shift types
+        shift_types = df_ensemble['shift_name'].unique()
+        for shift_type in shift_types:
+            if shift_type == "baseline":
+                continue  # Skip baseline as we already calculated it
+
+            df_shift = df_ensemble[df_ensemble["shift_name"] == shift_type]
+
+            # Calculate mean and CI for shift
+            shift_mean, shift_ci_lower, shift_ci_upper = calculate_confidence_intervals(df_shift[metric])
+
+            # Perform t-test against the baseline
+            p_value = perform_t_test(df_shift[metric], df_baseline[metric])
+
+            # Store shift results
+            results.append({
+                'ensemble_type': ensemble_type,
+                'shift_name': shift_type,
+                'mean': shift_mean,
+                'ci_lower': shift_ci_lower,
+                'ci_upper': shift_ci_upper,
+                'p_value': p_value
+            })
+
+    # Create a DataFrame with the results
+    results_df = pd.DataFrame(results)
+    # print(results_df)
+    significant_results = results_df[results_df['p_value'] < 0.05]
+    print("Significant results:", significant_results)
+    return results_df
+
+
+def perform_t_test(shift_data, baseline_data):
+    """Perform a t-test comparing shift data to baseline data."""
+    t_stat, p_value = stats.ttest_ind(shift_data, baseline_data, nan_policy='omit')
+    return p_value
+
+
+def calculate_confidence_intervals(data, confidence=0.95):
+    """Calculate the mean and confidence intervals for the given data."""
+    if len(data) <= 1:
+        return np.nan, np.nan, np.nan  # Handle cases with insufficient data
+    mean = np.mean(data)
+    sem = stats.sem(data)  # Standard error of the mean
+    h = sem * stats.t.ppf((1 + confidence) / 2.0, len(data) - 1)  # Margin of error
+    return mean, mean - h, mean + h  # Return mean and lower, upper bounds of the CI
 
 
 def replace_xtick_zero_with_baseline(valid_values):
@@ -209,12 +342,12 @@ def replace_xtick_zero_with_baseline(valid_values):
     for v in valid_values:
         if isinstance(v, str):
             if v.strip() == "0" or v.strip() == "0.0":
-                labels.append("baseline")
+                labels.append("Test")
             else:
                 labels.append(v)
         else:
             if abs(float(v)) == 0.0:
-                labels.append("baseline")
+                labels.append("Test")
             else:
                 labels.append(f"{float(v):.4g}")
 
@@ -426,4 +559,48 @@ def plot_baseline_drift(df, metric, show_conf_interval=True, with_age=True):
     plt.tight_layout()
     plt.show()
 
-    
+
+def make_legend_plot(ensemble_types, palette, save_path=None, ncol=2):
+    from matplotlib.lines import Line2D
+
+    marker_style = {"marker": "D", "linestyle": "-"}
+
+    ensemble_types = ['Augmentation', 'Deep Ensemble']
+
+    # We only need the first and last color from the palette
+    palette = [palette[0], palette[-1]]
+
+    # 3) Build the standalone legend figure
+    # fig, ax = plt.subplots(figsize=(12, 8))
+    fig, ax = plt.subplots(figsize=(6, 1.5))  # wider and shorter for a single‐row
+    ax.axis("off")  # hide axes
+
+    # 4) Create proxy artists for each category
+    handles = [
+        Line2D([0], [0], color=palette[i], **marker_style)
+        for i in range(len(ensemble_types))
+    ]
+
+    ax.legend(
+        handles,
+        ensemble_types,
+        loc="center",
+        ncol=ncol,  # two columns, will wrap into two rows for 3 entries
+        frameon=False,
+        columnspacing=1.0,  # adjust spacing between columns
+        handletextpad=0.5  # adjust spacing between marker and text
+    )
+
+    plt.tight_layout()
+
+    if save_path:
+        # 6) Save the legend as its own PDF
+        out_dir = os.path.join(save_path, f"legend_only")
+        os.makedirs(out_dir, exist_ok=True)
+        out_file = os.path.join(out_dir, f"{ncol}_legend.pdf")
+        fig.savefig(out_file, dpi=300, bbox_inches='tight', pad_inches=0.0)
+        plt.close(fig)
+    else:
+        plt.show()
+        plt.close(fig)
+
