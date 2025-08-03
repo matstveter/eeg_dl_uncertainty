@@ -39,7 +39,3 @@ Currently only available as a pre-print:
 	journal = {bioRxiv}
 }
 
-
-![Tests](https://github.com/matstveter/dl_uncertainty/actions/workflows/tests.yml/badge.svg)\
-![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)\
-![PyTorch](https://img.shields.io/badge/PyTorch-%23EE4C2C.svg?style=for-the-badge&logo=PyTorch&logoColor=white)
